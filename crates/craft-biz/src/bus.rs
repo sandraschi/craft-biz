@@ -178,6 +178,103 @@ impl Bus {
         fs::remove_file(from)?;
         Ok(())
     }
+
+    /// Events of `app` in one state, newest first, at most `limit`.
+    /// Unreadable files are skipped (pending() quarantines them).
+    pub fn history(&self, app: &str, state: EventState, limit: usize) -> Result<Vec<Event>> {
+        read_events(&self.dir(app, state.dir())?, limit)
+    }
+
+    /// Events that `source` sent to any app, with their state at the target,
+    /// newest first, at most `limit`. This is how a sender sees whether the
+    /// other app applied or rejected what it sent.
+    pub fn outgoing(&self, source: &str, limit: usize) -> Result<Vec<(Event, EventState)>> {
+        validate_name(source)?;
+        let mut out = Vec::new();
+        if !self.root.exists() {
+            return Ok(out);
+        }
+        for entry in fs::read_dir(&self.root)?.filter_map(|e| e.ok()) {
+            let Ok(app) = entry.file_name().into_string() else {
+                continue;
+            };
+            if validate_name(&app).is_err() || !entry.path().is_dir() {
+                continue;
+            }
+            for state in [EventState::Pending, EventState::Done, EventState::Failed] {
+                for ev in read_events(&self.dir(&app, state.dir())?, usize::MAX)? {
+                    if ev.source == source {
+                        out.push((ev, state));
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| b.0.id.cmp(&a.0.id));
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    /// Put a rejected event back into the inbox (error cleared) to try again.
+    pub fn retry(&self, app: &str, id: &str) -> Result<()> {
+        validate_id(id)?;
+        let from = self.dir(app, "failed")?.join(format!("{id}.json"));
+        let mut ev: Event = serde_json::from_slice(&fs::read(&from)?)?;
+        ev.error = None;
+        let inbox = self.dir(app, "inbox")?;
+        fs::create_dir_all(&inbox)?;
+        write_atomic(&inbox, id, &serde_json::to_vec_pretty(&ev)?)?;
+        fs::remove_file(from)?;
+        Ok(())
+    }
+}
+
+/// Where an event sits at its target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventState {
+    Pending,
+    Done,
+    Failed,
+}
+
+impl EventState {
+    fn dir(self) -> &'static str {
+        match self {
+            EventState::Pending => "inbox",
+            EventState::Done => "done",
+            EventState::Failed => "failed",
+        }
+    }
+}
+
+fn read_events(dir: &Path, limit: usize) -> Result<Vec<Event>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut names: Vec<String> = fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".json") && !n.starts_with('.'))
+        .collect();
+    names.sort_by(|a, b| b.cmp(a));
+    let mut out = Vec::new();
+    for name in names {
+        if out.len() >= limit {
+            break;
+        }
+        let path = dir.join(&name);
+        let small = fs::metadata(&path).is_ok_and(|m| m.len() as usize <= MAX_EVENT_BYTES);
+        if !small {
+            continue;
+        }
+        if let Some(ev) = fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Event>(&b).ok())
+        {
+            out.push(ev);
+        }
+    }
+    Ok(out)
 }
 
 fn write_atomic(dir: &Path, id: &str, bytes: &[u8]) -> Result<()> {
@@ -233,6 +330,54 @@ mod tests {
             .join(format!("{}.json", b.id));
         let ev: Event = serde_json::from_slice(&fs::read(failed).unwrap()).unwrap();
         assert_eq!(ev.error.as_deref(), Some("account 7000 closed"));
+        let _ = fs::remove_dir_all(bus.root());
+    }
+
+    #[test]
+    fn history_outgoing_and_retry() {
+        let bus = temp_bus("hist");
+        let a = bus
+            .emit("deskcraft", "taskcraft", "ticket.escalated", json!({}))
+            .unwrap();
+        let b = bus
+            .emit("deskcraft", "gaincraft", "signal.negative", json!({}))
+            .unwrap();
+        let c = bus
+            .emit("contractcraft", "gaincraft", "contract.executed", json!({}))
+            .unwrap();
+        bus.ack("taskcraft", &a.id).unwrap();
+        bus.reject("gaincraft", &b.id, "no account").unwrap();
+        let out = bus.outgoing("deskcraft", 10).unwrap();
+        assert_eq!(out.len(), 2, "only deskcraft's events");
+        assert_eq!(
+            (out[0].0.id.clone(), out[0].1),
+            (b.id.clone(), EventState::Failed),
+            "newest first"
+        );
+        assert_eq!(out[1].1, EventState::Done);
+        assert_eq!(
+            bus.history("gaincraft", EventState::Failed, 10).unwrap()[0]
+                .error
+                .as_deref(),
+            Some("no account")
+        );
+        assert_eq!(
+            bus.history("gaincraft", EventState::Pending, 10).unwrap()[0].id,
+            c.id
+        );
+        bus.retry("gaincraft", &b.id).unwrap();
+        let pending = bus.pending("gaincraft").unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending.iter().all(|e| e.error.is_none()));
+        assert!(bus
+            .history("gaincraft", EventState::Failed, 10)
+            .unwrap()
+            .is_empty());
+        assert!(bus.retry("gaincraft", "../x").is_err());
+        assert!(Bus::new(bus.root().join("nothing"))
+            .outgoing("deskcraft", 5)
+            .unwrap()
+            .is_empty());
         let _ = fs::remove_dir_all(bus.root());
     }
 
