@@ -54,11 +54,11 @@ pub fn class_of(account: u32) -> Result<u8> {
 /// Human name of an EKR class.
 pub fn class_name(class: u8) -> &'static str {
     match class {
-        0 => "Anlagevermoegen",
-        1 => "Vorraete",
-        2 => "Sonstiges Umlaufvermoegen",
-        3 => "Rueckstellungen, Verbindlichkeiten",
-        4 => "Betriebliche Ertraege",
+        0 => "Anlagevermögen",
+        1 => "Vorräte",
+        2 => "Sonstiges Umlaufvermögen",
+        3 => "Rückstellungen, Verbindlichkeiten",
+        4 => "Betriebliche Erträge",
         5 => "Material- und Leistungsaufwand",
         6 => "Personalaufwand",
         7 => "Abschreibungen, sonstige Aufwendungen",
@@ -97,8 +97,8 @@ pub fn seed_accounts() -> Vec<SeedAccount> {
     vec![
         acc(620, "EDV-Anlagen (Hardware)", Asset, Some(V20)),
         acc(630, "PKW", Asset, Some(V20)),
-        acc(660, "Betriebs- und Geschaeftsausstattung", Asset, Some(V20)),
-        acc(680, "Geringwertige Wirtschaftsgueter", Asset, Some(V20)),
+        acc(660, "Betriebs- und Geschäftsausstattung", Asset, Some(V20)),
+        acc(680, "Geringwertige Wirtschaftsgüter", Asset, Some(V20)),
         acc(1600, "Handelswaren", Asset, None),
         acc(2000, "Lieferforderungen Inland", Asset, None),
         acc(2500, "Vorsteuer", Asset, None),
@@ -116,33 +116,33 @@ pub fn seed_accounts() -> Vec<SeedAccount> {
             None,
         ),
         acc(3600, "Verbindlichkeiten Lohnabgaben", Liability, None),
-        acc(4000, "Umsatzerloese 20%", Revenue, Some(U20)),
-        acc(4010, "Umsatzerloese 10%", Revenue, Some(U10)),
-        acc(4013, "Umsatzerloese 13%", Revenue, Some(U13)),
+        acc(4000, "Umsatzerlöse 20%", Revenue, Some(U20)),
+        acc(4010, "Umsatzerlöse 10%", Revenue, Some(U10)),
+        acc(4013, "Umsatzerlöse 13%", Revenue, Some(U13)),
         acc(5000, "Wareneinsatz", Expense, Some(V20)),
         acc(5800, "Fremdleistungen", Expense, Some(V20)),
-        acc(6200, "Gehaelter", Expense, None),
+        acc(6200, "Gehälter", Expense, None),
         acc(
             6560,
             "Gesetzlicher Sozialaufwand Angestellte",
             Expense,
             None,
         ),
-        acc(7000, "Planmaessige Abschreibung", Expense, None),
+        acc(7000, "Planmäßige Abschreibung", Expense, None),
         acc(7010, "Sofortabschreibung GWG", Expense, None),
         acc(7200, "Instandhaltung", Expense, Some(V20)),
         acc(7380, "Telefon und Internet", Expense, Some(V20)),
         acc(7400, "Miete", Expense, Some(V20)),
-        acc(7600, "Bueromaterial", Expense, Some(V20)),
+        acc(7600, "Büromaterial", Expense, Some(V20)),
         acc(7650, "Software und Lizenzen", Expense, Some(V20)),
         acc(7700, "Versicherungen", Expense, None),
         acc(7750, "Rechts- und Beratungsaufwand", Expense, Some(V20)),
         acc(7790, "Spesen des Geldverkehrs", Expense, None),
-        acc(8100, "Zinsertraege", Revenue, None),
+        acc(8100, "Zinserträge", Revenue, None),
         acc(8300, "Zinsaufwand", Expense, None),
         acc(9000, "Kapital", Equity, None),
         acc(9600, "Privat", Equity, None),
-        acc(9800, "Eroeffnungsbilanzkonto", Equity, None),
+        acc(9800, "Eröffnungsbilanzkonto", Equity, None),
         acc(9850, "Schlussbilanzkonto", Equity, None),
     ]
 }
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(class_of(2800).unwrap(), 2);
         assert_eq!(class_of(620).unwrap(), 0);
         assert!(class_of(10_000).is_err());
-        assert_eq!(class_name(4), "Betriebliche Ertraege");
+        assert_eq!(class_name(4), "Betriebliche Erträge");
     }
 
     #[test]
