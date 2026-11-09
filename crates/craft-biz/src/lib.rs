@@ -11,6 +11,7 @@ pub mod bus;
 pub mod confine;
 pub mod deadline;
 pub mod ekr;
+pub mod holidays;
 pub mod i18n;
 pub mod mcp;
 pub mod money;

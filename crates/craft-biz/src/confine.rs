@@ -13,10 +13,10 @@ impl Confinement {
     pub fn roots(paths: &[PathBuf]) -> Result<Confinement, String> {
         let mut out = Vec::new();
         for p in paths {
-            out.push(
+            out.push(plain(
                 p.canonicalize()
                     .map_err(|e| format!("--allow-path {}: {e}", p.display()))?,
-            );
+            ));
         }
         Ok(Confinement(Some(out)))
     }
@@ -41,6 +41,7 @@ impl Confinement {
         } else {
             p.canonicalize().map_err(|e| format!("{path}: {e}"))?
         };
+        let resolved = plain(resolved);
         match &self.0 {
             None => Ok(resolved),
             Some(roots) if roots.iter().any(|r| resolved.starts_with(r)) => Ok(resolved),
@@ -52,6 +53,16 @@ impl Confinement {
                 resolved.display()
             )),
         }
+    }
+}
+
+/// Drop the Windows verbatim prefix that `canonicalize` adds (`\\?\D:\x` -> `D:\x`)
+/// so paths shown to users and agents look normal. UNC verbatim paths are kept.
+pub fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => p,
     }
 }
 
@@ -83,6 +94,17 @@ mod tests {
         let outside = std::env::temp_dir().display().to_string();
         assert!(c.check(&outside, false).unwrap_err().contains("outside"));
         assert!(c.check("", false).is_err());
+        assert!(!c
+            .check(&path, false)
+            .unwrap()
+            .display()
+            .to_string()
+            .starts_with(r"\\?\"));
+        assert_eq!(plain(PathBuf::from(r"\\?\D:\x")), PathBuf::from(r"D:\x"));
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\srv\s")),
+            PathBuf::from(r"\\?\UNC\srv\s")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
