@@ -53,7 +53,8 @@ fn ok_response(id: Value, result: Value) -> Value {
 /// Handle one request line. Returns the response, or `None` for notifications
 /// and blank lines.
 pub fn handle_line<H: ToolHost>(host: &mut H, line: &str) -> Option<Value> {
-    let trimmed = line.trim();
+    // Windows PowerShell pipes stdin with a UTF-8 BOM on the first line.
+    let trimmed = line.trim_start_matches('\u{feff}').trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -230,6 +231,15 @@ mod tests {
                 .unwrap();
         assert_eq!(failed["result"]["isError"], true);
         assert!(call("   ").is_none());
+    }
+
+    #[test]
+    fn leading_bom_is_tolerated() {
+        let init =
+            call("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}")
+                .unwrap();
+        assert_eq!(init["id"], 1);
+        assert!(init.get("error").is_none());
     }
 
     #[test]

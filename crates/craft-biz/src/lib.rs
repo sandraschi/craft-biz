@@ -8,6 +8,7 @@
 
 pub mod at;
 pub mod bus;
+pub mod confine;
 pub mod deadline;
 pub mod ekr;
 pub mod i18n;
