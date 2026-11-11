@@ -181,6 +181,8 @@ pub trait SuiteApp {
     fn status_info(&self) -> String {
         String::new()
     }
+    /// Select a record by key (`--select`, deep links). Default: nothing.
+    fn select(&mut self, _key: &str) {}
     /// Tool used by `--smoke` (prints its result and exits).
     fn smoke_tool(&self) -> &'static str;
 }
@@ -197,6 +199,7 @@ pub struct Args {
     pub smoke: bool,
     pub demo: bool,
     pub size: Option<(f32, f32)>,
+    pub select: Option<String>,
 }
 
 impl Args {
@@ -233,6 +236,7 @@ impl Args {
                         h.parse().map_err(|_| "bad height")?,
                     ));
                 }
+                "--select" => a.select = Some(val("--select")?),
                 "--smoke" => a.smoke = true,
                 "--demo" => a.demo = true,
                 "-h" | "--help" => return Err(HELP.into()),
@@ -251,6 +255,7 @@ pub const HELP: &str = "Options:
   --dark | --light   colour scheme (default: last used)
   --lang de|en       language (default: last used)
   --view N           start in view N (0 = first)
+  --select KEY       open this record (ticket, account, contract...)
   --zoom F           zoom factor, e.g. 1.25 (Ctrl+wheel changes it live)
   --size WxH         window size, e.g. 1440x900
   --demo             fill an empty database with demo data first
@@ -327,6 +332,9 @@ impl<A: SuiteApp> Shell<A> {
             self.view = v;
         }
         self.shot = a.screenshot.clone().map(Shot::new);
+        if let Some(k) = &a.select {
+            self.app.select(k);
+        }
         self
     }
 

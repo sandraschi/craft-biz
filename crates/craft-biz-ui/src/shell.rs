@@ -230,6 +230,7 @@ pub fn nav_item(
     let t = theme::current(ui.ctx());
     let w = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 34.0), Sense::click());
+    let mut truncated = false;
     if ui.is_rect_visible(rect) {
         let bg = if selected {
             Some(t.accent_soft)
@@ -266,13 +267,31 @@ pub fn nav_item(
         } else {
             FontFamily::Proportional
         };
-        ui.painter().text(
-            rect.left_center() + egui::vec2(40.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            label,
+        let badge_w = badge
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, _)| {
+                widgets::pill_size(
+                    ui.painter(),
+                    &if n > 99 {
+                        "99+".to_string()
+                    } else {
+                        n.to_string()
+                    },
+                )
+                .x + 12.0
+            })
+            .unwrap_or(0.0);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label.to_string(),
             egui::FontId::new(14.5, fam),
             fg,
         );
+        job.wrap =
+            egui::text::TextWrapping::truncate_at_width((rect.width() - 48.0 - badge_w).max(30.0));
+        let galley = ui.painter().layout_job(job);
+        let pos = rect.left_center() + egui::vec2(40.0, -galley.size().y / 2.0);
+        truncated = galley.elided;
+        ui.painter().galley(pos, galley, fg);
         if let Some((n, tone)) = badge.filter(|(n, _)| *n > 0) {
             let s = if n > 99 {
                 "99+".to_string()
@@ -289,7 +308,12 @@ pub fn nav_item(
             );
         }
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if truncated {
+        resp.on_hover_text(label)
+    } else {
+        resp
+    }
 }
 
 /// Group caption in the navigation rail.

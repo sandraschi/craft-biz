@@ -351,6 +351,8 @@ pub fn visuals(dark: bool) -> Visuals {
     w.open.corner_radius = r;
     v.striped = true;
     v.indent_has_left_vline = false;
+    // Disabled controls stay readable (egui default fades to 50%).
+    v.disabled_alpha = 0.72;
     v
 }
 

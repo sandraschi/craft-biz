@@ -134,6 +134,8 @@ pub enum Cell {
     Person(String),
     /// Values 0..1 or any range; drawn as a small line.
     Spark(Vec<f32>, Tone),
+    /// A coloured status dot (tooltip-free, for a narrow first column).
+    Dot(Tone),
     Empty,
 }
 
@@ -153,6 +155,7 @@ impl Cell {
                 .collect::<Vec<_>>()
                 .join(", "),
             Cell::Spark(v, _) => v.last().map(|x| format!("{x}")).unwrap_or_default(),
+            Cell::Dot(_) => String::new(),
             Cell::Empty => String::new(),
         }
     }
@@ -537,6 +540,13 @@ fn paint_cell(ui: &Ui, r: Rect, cell: &Cell, numeric: bool) {
                 pts,
                 Stroke::new(2.0, theme::tone_solid(*tone, t.dark)),
             ));
+        }
+        Cell::Dot(tone) => {
+            painter.circle_filled(
+                egui::pos2(r.left() + 6.0, r.center().y),
+                5.5,
+                theme::tone_solid(*tone, t.dark),
+            );
         }
         Cell::Spark(..) | Cell::Empty => {}
     }
