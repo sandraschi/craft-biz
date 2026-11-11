@@ -15,23 +15,110 @@ pub struct Col {
     pub weight: f32,
     /// Right-aligned, sorted numerically (DE amounts understood).
     pub numeric: bool,
+    /// Never narrower than this (px).
+    pub min: f32,
+    /// 0 = always shown. When the table is too narrow, the column with the
+    /// highest priority number is hidden first.
+    pub prio: u8,
+}
+
+fn auto_min(title: &str, weight: f32) -> f32 {
+    (title.chars().count() as f32 * 7.6 + 34.0)
+        .max(weight * 52.0)
+        .max(52.0)
 }
 
 impl Col {
     pub fn new(title: impl Into<String>, weight: f32) -> Col {
+        let title = title.into();
+        let min = auto_min(&title, weight);
         Col {
-            title: title.into(),
+            title,
             weight,
             numeric: false,
+            min,
+            prio: 0,
         }
     }
     pub fn num(title: impl Into<String>, weight: f32) -> Col {
+        let title = title.into();
+        let min = auto_min(&title, weight);
         Col {
-            title: title.into(),
+            title,
             weight,
             numeric: true,
+            min,
+            prio: 0,
         }
     }
+    pub fn min(mut self, px: f32) -> Col {
+        self.min = px;
+        self
+    }
+    /// Hide this column early when space is short (higher = earlier).
+    pub fn prio(mut self, p: u8) -> Col {
+        self.prio = p;
+        self
+    }
+}
+
+/// Column widths for `avail` pixels: hides low-priority columns until the
+/// minimum widths fit, then shares the rest by weight. Hidden columns get 0.
+pub fn fit_widths(cols: &[Col], avail: f32) -> Vec<f32> {
+    let n = cols.len();
+    let mut visible = vec![true; n];
+    loop {
+        let need: f32 = (0..n).filter(|i| visible[*i]).map(|i| cols[i].min).sum();
+        if need <= avail {
+            break;
+        }
+        match (0..n)
+            .filter(|i| visible[*i] && cols[*i].prio > 0)
+            .max_by_key(|i| (cols[*i].prio, *i))
+        {
+            Some(i) => visible[i] = false,
+            None => break,
+        }
+    }
+    let weight: f32 = (0..n)
+        .filter(|i| visible[*i])
+        .map(|i| cols[i].weight)
+        .sum::<f32>()
+        .max(0.001);
+    let mut w: Vec<f32> = (0..n)
+        .map(|i| {
+            if visible[i] {
+                avail * cols[i].weight / weight
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    // Columns below their minimum take it; the others give back proportionally.
+    for _ in 0..3 {
+        let short: f32 = (0..n)
+            .filter(|i| visible[*i] && w[*i] < cols[*i].min)
+            .map(|i| cols[i].min - w[i])
+            .sum();
+        if short <= 0.5 {
+            break;
+        }
+        let spare: f32 = (0..n)
+            .filter(|i| visible[*i] && w[*i] > cols[*i].min)
+            .map(|i| w[i] - cols[i].min)
+            .sum();
+        for i in 0..n {
+            if !visible[i] {
+                continue;
+            }
+            if w[i] < cols[i].min {
+                w[i] = cols[i].min;
+            } else if spare > 0.0 {
+                w[i] -= (w[i] - cols[i].min) / spare * short.min(spare);
+            }
+        }
+    }
+    w
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,13 +302,9 @@ impl<'a> Table<'a> {
             ui.add_space(4.0);
         }
         let order = self.order(&mem);
-        let total_w = ui.available_width().max(200.0);
-        let weight: f32 = self.cols.iter().map(|c| c.weight).sum::<f32>().max(0.001);
-        let widths: Vec<f32> = self
-            .cols
-            .iter()
-            .map(|c| total_w * c.weight / weight)
-            .collect();
+        let avail = ui.available_width().max(200.0);
+        let widths = fit_widths(self.cols, avail);
+        let total_w = widths.iter().sum::<f32>().max(avail);
 
         // Header
         let (hrect, _) = ui.allocate_exact_size(Vec2::new(total_w, 32.0), Sense::hover());
@@ -241,6 +324,9 @@ impl<'a> Table<'a> {
         );
         let mut x = hrect.left();
         for (i, c) in self.cols.iter().enumerate() {
+            if widths[i] <= 0.0 {
+                continue;
+            }
             let r = Rect::from_min_size(
                 Pos2::new(x, hrect.top()),
                 Vec2::new(widths[i], hrect.height()),
@@ -328,6 +414,9 @@ impl<'a> Table<'a> {
                     );
                     let mut x = rect.left();
                     for (i, cell) in cells.iter().enumerate().take(self.cols.len()) {
+                        if widths[i] <= 0.0 {
+                            continue;
+                        }
                         let r = Rect::from_min_size(
                             Pos2::new(x, rect.top()),
                             Vec2::new(widths[i], row_h),
@@ -463,6 +552,34 @@ mod tests {
         assert_eq!(sort_number("-12,5"), Some(-12.5));
         assert_eq!(sort_number("81%"), Some(81.0));
         assert_eq!(sort_number("abc"), None);
+    }
+
+    #[test]
+    fn narrow_tables_hide_low_priority_columns_first() {
+        let cols = [
+            Col::new("Account", 2.4),
+            Col::new("Health", 1.0),
+            Col::num("Score", 0.6),
+            Col::new("Trend", 1.0).prio(1),
+            Col::num("Seats", 0.7).prio(2),
+            Col::new("Notice", 1.0).prio(2),
+        ];
+        let wide = fit_widths(&cols, 1400.0);
+        assert!(wide.iter().all(|w| *w > 0.0));
+        assert!((wide.iter().sum::<f32>() - 1400.0).abs() < 1.0);
+        let narrow = fit_widths(&cols, 420.0);
+        assert_eq!(narrow[5], 0.0, "Notice (prio 2, last) goes first");
+        assert_eq!(narrow[4], 0.0, "then Seats");
+        assert!(
+            narrow[0] > 0.0 && narrow[2] >= cols[2].min - 0.5,
+            "Score keeps its minimum"
+        );
+        for (i, w) in narrow.iter().enumerate() {
+            assert!(
+                *w == 0.0 || *w + 0.5 >= cols[i].min,
+                "col {i} below min: {w}"
+            );
+        }
     }
 
     #[test]

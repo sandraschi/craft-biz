@@ -146,6 +146,7 @@ pub struct Board<'a> {
     rule: Option<Rule<'a>>,
     selected: Option<&'a str>,
     col_width: f32,
+    col_width_fixed: bool,
     add_buttons: bool,
     keyboard: bool,
 }
@@ -177,6 +178,7 @@ impl<'a> Board<'a> {
             rule: None,
             selected: None,
             col_width: 284.0,
+            col_width_fixed: false,
             add_buttons: true,
             keyboard: true,
         }
@@ -195,6 +197,7 @@ impl<'a> Board<'a> {
     }
     pub fn column_width(mut self, w: f32) -> Self {
         self.col_width = w.max(180.0);
+        self.col_width_fixed = true;
         self
     }
     pub fn add_buttons(mut self, on: bool) -> Self {
@@ -395,6 +398,22 @@ impl<'a> Board<'a> {
         } else {
             self.lanes
         };
+        // Fit the open columns to the visible width (220..=380 px each); scroll only below 220.
+        let open_n = self
+            .columns
+            .iter()
+            .filter(|c| !mem.collapsed.contains(&c.id))
+            .count()
+            .max(1);
+        let closed_w =
+            (self.columns.len() - open_n.min(self.columns.len())) as f32 * (COLLAPSED_W + GAP);
+        let fit = ((ui.available_width() - closed_w - GAP * open_n as f32 - 14.0) / open_n as f32)
+            .clamp(220.0, 380.0);
+        let open_w = if self.col_width_fixed {
+            self.col_width
+        } else {
+            fit
+        };
         let widths: Vec<f32> = self
             .columns
             .iter()
@@ -402,7 +421,7 @@ impl<'a> Board<'a> {
                 if mem.collapsed.contains(&c.id) {
                     COLLAPSED_W
                 } else {
-                    self.col_width
+                    open_w
                 }
             })
             .collect();

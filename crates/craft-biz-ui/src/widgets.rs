@@ -143,15 +143,16 @@ pub fn section(ui: &mut Ui, title: &str, count: Option<usize>) {
 /// Page title row: big title, subtitle, actions on the right.
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            ui.label(RichText::new(title).family(semibold()).size(22.0));
-            if !subtitle.is_empty() {
-                ui.label(RichText::new(subtitle).color(theme::current(ui.ctx()).text_weak));
-            }
-        });
+        ui.label(RichText::new(title).family(semibold()).size(22.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
     });
-    ui.add_space(6.0);
+    if !subtitle.is_empty() {
+        ui.add(
+            egui::Label::new(RichText::new(subtitle).color(theme::current(ui.ctx()).text_weak))
+                .wrap(),
+        );
+    }
+    ui.add_space(8.0);
 }
 
 /// White card with border and soft shadow.
@@ -168,21 +169,75 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
             spread: 0,
             color: t.shadow.gamma_multiply(0.6),
         })
-        .show(ui, add)
+        .show(ui, |ui| ui.vertical(add).inner)
         .inner
 }
 
-/// KPI tile: label, big value, optional note with tone.
+/// KPI tile: label, big value, optional note with tone. Prefer [`kpi_row`].
 pub fn kpi(ui: &mut Ui, label: &str, value: &str, note: Option<(&str, Tone)>) {
     card(ui, |ui| {
         ui.set_min_width(170.0);
-        let t = theme::current(ui.ctx());
-        ui.label(RichText::new(label).color(t.text_weak).size(13.0));
-        ui.label(RichText::new(value).family(semibold()).size(24.0));
-        if let Some((n, tone)) = note {
+        kpi_body(ui, label, value, note);
+    });
+}
+
+fn kpi_body(ui: &mut Ui, label: &str, value: &str, note: Option<(&str, Tone)>) {
+    let t = theme::current(ui.ctx());
+    ui.add(egui::Label::new(RichText::new(label).color(t.text_weak).size(13.0)).truncate());
+    ui.add(egui::Label::new(RichText::new(value).family(semibold()).size(24.0)).truncate());
+    match note {
+        Some((n, tone)) => {
             pill(ui, n, tone);
         }
-    });
+        None => {
+            ui.add_space(22.0);
+        }
+    }
+}
+
+/// One KPI tile in a [`kpi_row`].
+pub struct Kpi {
+    pub label: String,
+    pub value: String,
+    pub note: Option<(String, Tone)>,
+}
+
+impl Kpi {
+    pub fn new(label: impl Into<String>, value: impl Into<String>) -> Kpi {
+        Kpi {
+            label: label.into(),
+            value: value.into(),
+            note: None,
+        }
+    }
+    pub fn note(mut self, text: impl Into<String>, tone: Tone) -> Kpi {
+        self.note = Some((text.into(), tone));
+        self
+    }
+}
+
+/// Equal-width KPI tiles that always fit the width (several rows if needed).
+pub fn kpi_row(ui: &mut Ui, items: &[Kpi]) {
+    if items.is_empty() {
+        return;
+    }
+    let per_row = ((ui.available_width() / 172.0).floor() as usize).clamp(1, items.len());
+    for chunk in items.chunks(per_row) {
+        ui.columns(per_row, |cols| {
+            for (i, k) in chunk.iter().enumerate() {
+                card(&mut cols[i], |ui| {
+                    ui.set_width(ui.available_width());
+                    kpi_body(
+                        ui,
+                        &k.label,
+                        &k.value,
+                        k.note.as_ref().map(|(n, t)| (n.as_str(), *t)),
+                    );
+                });
+            }
+        });
+        ui.add_space(6.0);
+    }
 }
 
 /// Tiny line chart; last point marked.

@@ -145,9 +145,27 @@ impl Form {
     /// Prefill a field (e.g. the selected record's key).
     pub fn set(&mut self, name: &str, value: &str) {
         if let Some(f) = self.fields.iter_mut().find(|f| f.name == name) {
-            f.text = value.to_string();
+            if f.kind == Kind::Bool {
+                f.flag = matches!(value, "true" | "1" | "yes");
+            } else {
+                f.text = value.to_string();
+            }
         }
     }
+}
+
+/// Arguments that name a file or folder get a Browse button.
+pub fn is_path_field(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n == "path"
+        || n.ends_with("_path")
+        || n.ends_with("path")
+        || n.ends_with("_dir")
+        || n == "dir"
+        || n.ends_with("_file")
+        || n == "file"
+        || n == "folder"
+        || n == "out"
 }
 
 /// Palette state, owned by the app.
@@ -213,6 +231,30 @@ impl Palette {
         }
         self.form = Some(f);
         self.open = true;
+    }
+
+    /// Tool of the open form, if a form is open (for tests and automation).
+    pub fn form_tool(&self) -> Option<&str> {
+        self.form
+            .as_ref()
+            .filter(|_| self.open)
+            .map(|f| f.tool.as_str())
+    }
+
+    /// Current text of a field in the open form.
+    pub fn form_value(&self, name: &str) -> Option<String> {
+        self.form
+            .as_ref()?
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| {
+                if f.kind == Kind::Bool {
+                    f.flag.to_string()
+                } else {
+                    f.text.clone()
+                }
+            })
     }
 
     pub fn close(&mut self) {
@@ -309,11 +351,33 @@ impl Palette {
                                             );
                                         }
                                         _ => {
+                                            let pathlike = is_path_field(&f.name);
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut f.text)
-                                                    .desired_width(380.0)
+                                                    .desired_width(if pathlike {
+                                                        300.0
+                                                    } else {
+                                                        380.0
+                                                    })
                                                     .hint_text(&f.description),
                                             );
+                                            if pathlike && ui.button("Browse...").clicked() {
+                                                let dlg = rfd::FileDialog::new();
+                                                let picked = if f.name.contains("dir")
+                                                    || f.name.contains("folder")
+                                                {
+                                                    dlg.pick_folder()
+                                                } else if f.name.starts_with("out")
+                                                    || f.name.contains("target")
+                                                {
+                                                    dlg.save_file()
+                                                } else {
+                                                    dlg.pick_file()
+                                                };
+                                                if let Some(p) = picked {
+                                                    f.text = p.display().to_string();
+                                                }
+                                            }
                                         }
                                     });
                                     if f.nullable {

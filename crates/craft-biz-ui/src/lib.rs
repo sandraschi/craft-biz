@@ -9,6 +9,7 @@
 //! - [`coverage`]: test helper proving every MCP tool has a place in the window.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod app;
 pub mod coverage;
 pub mod kanban;
 pub mod palette;
@@ -18,6 +19,7 @@ pub mod table;
 pub mod theme;
 pub mod widgets;
 
+pub use eframe;
 pub use egui;
 pub use theme::Tone;
 
