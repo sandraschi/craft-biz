@@ -398,7 +398,7 @@ impl<'a> Board<'a> {
         } else {
             self.lanes
         };
-        // Fit the open columns to the visible width (220..=380 px each); scroll only below 220.
+        // Fit the open columns to the visible width (180..=380 px each); scroll only below 180.
         let open_n = self
             .columns
             .iter()
@@ -408,7 +408,7 @@ impl<'a> Board<'a> {
         let closed_w =
             (self.columns.len() - open_n.min(self.columns.len())) as f32 * (COLLAPSED_W + GAP);
         let fit = ((ui.available_width() - closed_w - GAP * open_n as f32 - 14.0) / open_n as f32)
-            .clamp(220.0, 380.0);
+            .clamp(180.0, 380.0);
         let open_w = if self.col_width_fixed {
             self.col_width
         } else {

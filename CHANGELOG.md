@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `kanban`: columns shrink to 180 px (was 220) before the board scrolls, so a 5-column board fits a 1440 px window without hiding the last column.
 - New crate `craft-biz-ui`: shared egui kit for the back-office suite. High-contrast light and dark theme (contrast ratios enforced by a test: body text >= 12:1, secondary text and status pills >= 7:1), Segoe UI fonts, Ctrl+mouse-wheel zoom 50-300% with Ctrl+0 reset and saved zoom level, toasts, top bar, nav rail, status bar, screenshot helper.
 - `craft-biz-ui::kanban`: board widget with workflow rules (a refused drop shows the reason), swimlanes, WIP limits, collapsible columns, insertion line, right-click Move to, keyboard moves, undo event. No usable egui kanban crate exists; built on egui's own drag and drop.
 - `craft-biz-ui::table` (sort, filter, virtual scrolling, pills, amounts, sparklines, CSV), `palette` (Ctrl+K, forms generated from MCP tool schemas), `signals` (bus dock: waiting, applied, rejected with retry, sent), `coverage` (test helper: every MCP tool needs a place in the window).
