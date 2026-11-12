@@ -19,6 +19,10 @@ pub struct UiSettings {
     pub dark: bool,
     pub zoom: f32,
     pub lang: String,
+    /// Which panels are shown (Window menu).
+    pub layout: Layout,
+    /// Recently opened databases, newest first (File > Open Recent).
+    pub recent: Vec<String>,
 }
 
 impl Default for UiSettings {
@@ -27,7 +31,42 @@ impl Default for UiSettings {
             dark: false,
             zoom: 1.0,
             lang: "de".into(),
+            layout: Layout::default(),
+            recent: Vec::new(),
         }
+    }
+}
+
+/// Panel visibility, toggled from the Window menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Layout {
+    pub nav: bool,
+    pub detail: bool,
+    pub status: bool,
+    pub quick: bool,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout {
+            nav: true,
+            detail: true,
+            status: true,
+            quick: true,
+        }
+    }
+}
+
+pub const RECENT_MAX: usize = 8;
+
+impl UiSettings {
+    /// Put `path` first in the recent list (no duplicates, at most [`RECENT_MAX`]).
+    pub fn push_recent(&mut self, path: &Path) {
+        let p = path.display().to_string();
+        self.recent.retain(|r| !r.eq_ignore_ascii_case(&p));
+        self.recent.insert(0, p);
+        self.recent.truncate(RECENT_MAX);
     }
 }
 
@@ -445,15 +484,36 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("craft-biz-ui-settings-{}", std::process::id()));
         let p = dir.join("ui.json");
-        let s = UiSettings {
+        let mut s = UiSettings {
             dark: true,
             zoom: 1.25,
             lang: "en".into(),
+            layout: Layout {
+                nav: false,
+                ..Layout::default()
+            },
+            ..UiSettings::default()
         };
+        for i in 0..12 {
+            s.push_recent(Path::new(&format!("C:/db/{i}.db")));
+        }
+        s.push_recent(Path::new("C:/db/5.db"));
+        assert_eq!(s.recent.len(), RECENT_MAX);
+        assert_eq!(s.recent[0], Path::new("C:/db/5.db").display().to_string());
+        assert_eq!(
+            s.recent.iter().filter(|r| r.ends_with("5.db")).count(),
+            1,
+            "no duplicates"
+        );
         s.save(&p).unwrap();
         assert_eq!(UiSettings::load(&p), s);
         std::fs::write(&p, br#"{"zoom": 99}"#).unwrap();
         assert_eq!(UiSettings::load(&p).zoom, ZOOM_MAX);
+        assert_eq!(
+            UiSettings::load(&p).layout,
+            Layout::default(),
+            "old ui.json without layout keeps all panels"
+        );
         std::fs::write(&p, b"junk").unwrap();
         assert_eq!(UiSettings::load(&p), UiSettings::default());
         let _ = std::fs::remove_dir_all(dir);

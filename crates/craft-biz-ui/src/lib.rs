@@ -7,11 +7,15 @@
 //! - [`palette`]: Ctrl+K command palette with forms generated from MCP tool schemas.
 //! - [`signals`]: bus dock (waiting, applied, rejected, sent) with drain and retry.
 //! - [`coverage`]: test helper proving every MCP tool has a place in the window.
+//! - [`menu`]: Craft Menu Bar Standard bar, shortcuts, smoke parity, tofu guard.
+//! - [`help`]: Help suite dialogs (shortcuts, docs, licenses, about, preferences).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod app;
 pub mod coverage;
+pub mod help;
 pub mod kanban;
+pub mod menu;
 pub mod palette;
 pub mod shell;
 pub mod signals;

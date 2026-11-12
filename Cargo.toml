@@ -18,6 +18,9 @@ thiserror = "2"
 egui = "0.37"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

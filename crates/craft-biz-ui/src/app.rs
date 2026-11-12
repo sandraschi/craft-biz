@@ -7,7 +7,15 @@
 //! Views never change data directly: they call [`Frame::run`] (or open a
 //! form with [`Frame::form`]); the shell dispatches after the frame, shows
 //! the outcome and asks the app to reload. One code path with CLI and MCP.
+//!
+//! The shell also draws the menu bar of the Craft Menu Bar Standard: the
+//! bookends `File Edit View ... Window Help` are the shell's, the app adds
+//! items through [`SuiteApp::menus`] (domain menus such as Insert, Modify,
+//! Commands go in the middle). Help holds the five dialogs: Command Palette,
+//! Keyboard Shortcuts, Project Files & Docs, Licenses & Notices, About.
 
+use crate::help::{self, AppInfo, Dialog, Doc, HelpState, ShortcutRow};
+use crate::menu::{self, Item, Menu, Picked};
 use crate::palette::{self, Palette};
 use crate::shell::{self, Shot, Toasts, UiSettings};
 use crate::signals::{SignalAction, SignalsDock};
@@ -16,7 +24,7 @@ use crate::widgets;
 use craft_biz::bus::Bus;
 use egui::{Context, Key, Modifiers, RichText, Ui};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One entry of the navigation rail.
 pub struct NavEntry {
@@ -134,6 +142,23 @@ impl Frame {
     }
 }
 
+/// What an app adds to the shell's menu bar.
+#[derive(Default)]
+pub struct AppMenus {
+    /// Top of File (New..., Import...).
+    pub file_new: Vec<Item>,
+    /// File > Save As... (e.g. a backup form).
+    pub save_as: Option<Item>,
+    /// File > Export... items.
+    pub export: Vec<Item>,
+    /// Top of View (views, perspectives). Empty: one item per navigation entry.
+    pub view: Vec<Item>,
+    /// Domain menus between View and Window (Insert, Modify, Commands...).
+    pub middle: Vec<Menu>,
+    /// Extra items at the end of Window.
+    pub window: Vec<Item>,
+}
+
 /// Event kinds with a short description: (consumed, emitted).
 pub type Wiring = (
     Vec<(&'static str, &'static str)>,
@@ -185,6 +210,62 @@ pub trait SuiteApp {
     fn select(&mut self, _key: &str) {}
     /// Tool used by `--smoke` (prints its result and exits).
     fn smoke_tool(&self) -> &'static str;
+
+    // ---- menu bar (all optional) ----
+
+    /// The window's language changed (or was set at start). For app text
+    /// built outside a view, such as undo labels.
+    fn set_lang(&mut self, _de: bool) {}
+    /// Items the app adds to the menu bar.
+    fn menus(&self, _f: &Frame) -> AppMenus {
+        AppMenus::default()
+    }
+    /// An app action chosen from a menu (`Item::action` ids not starting with `shell.`).
+    fn menu_action(&mut self, _id: &str, _f: &mut Frame) {}
+    /// "Undo <what>" if there is something to undo.
+    fn undo_label(&self) -> Option<String> {
+        None
+    }
+    fn redo_label(&self) -> Option<String> {
+        None
+    }
+    fn undo(&mut self) -> Result<String, String> {
+        Err("nothing to undo".into())
+    }
+    fn redo(&mut self) -> Result<String, String> {
+        Err("nothing to redo".into())
+    }
+    /// Text for Edit > Copy when no text field has focus (the selected record).
+    fn copy_text(&self, _view: usize) -> Option<String> {
+        None
+    }
+    /// File > Save. Apps that write every change at once say so.
+    fn save(&mut self) -> Result<String, String> {
+        Ok("every change is saved when it is made".into())
+    }
+    /// File > Close: drop the selection, back to the first view.
+    fn close(&mut self) {}
+    /// View that holds the app's settings (Edit > Preferences). None: shell dialog.
+    fn preferences_view(&self) -> Option<usize> {
+        None
+    }
+    /// About / Licenses facts.
+    fn info(&self) -> AppInfo {
+        AppInfo {
+            name: self.name().into(),
+            version: self.version().into(),
+            license: "MIT OR Apache-2.0".into(),
+            ..AppInfo::default()
+        }
+    }
+    /// Help > Project Files & Docs.
+    fn docs(&self) -> Vec<Doc> {
+        Vec::new()
+    }
+    /// Keys handled inside views (board arrows...), for the shortcut sheet.
+    fn extra_shortcuts(&self, _de: bool) -> Vec<ShortcutRow> {
+        Vec::new()
+    }
 }
 
 /// Command line shared by every suite window.
@@ -268,6 +349,17 @@ struct Confirm {
     call: Call,
 }
 
+/// Edit menu operation applied to the text field that had focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditOp {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+type Opener<A> = Box<dyn Fn(&Path) -> Result<A, String>>;
+
 /// The window around a [`SuiteApp`].
 pub struct Shell<A: SuiteApp> {
     pub app: A,
@@ -283,6 +375,14 @@ pub struct Shell<A: SuiteApp> {
     confirm: Option<Confirm>,
     search: String,
     pub last_error: Option<String>,
+    help: HelpState,
+    opener: Option<Opener<A>>,
+    db: Option<PathBuf>,
+    last_focus: Option<egui::Id>,
+    /// Selection of `last_focus` (a text field loses it when the menu takes focus).
+    last_sel: Option<egui::text::CCursorRange>,
+    pending_edit: Option<(egui::Id, EditOp)>,
+    pending: Vec<Picked>,
 }
 
 impl<A: SuiteApp> Shell<A> {
@@ -305,6 +405,13 @@ impl<A: SuiteApp> Shell<A> {
             confirm: None,
             search: String::new(),
             last_error: None,
+            help: HelpState::default(),
+            opener: None,
+            db: None,
+            last_focus: None,
+            last_sel: None,
+            pending_edit: None,
+            pending: Vec::new(),
         };
         if let Err(e) = s.app.reload() {
             s.toasts.err(e.clone());
@@ -331,6 +438,7 @@ impl<A: SuiteApp> Shell<A> {
         if let Some(v) = a.view {
             self.view = v;
         }
+        self.app.set_lang(self.settings.lang != "en");
         self.shot = a.screenshot.clone().map(Shot::new);
         if let Some(k) = &a.select {
             self.app.select(k);
@@ -338,9 +446,512 @@ impl<A: SuiteApp> Shell<A> {
         self
     }
 
+    /// Let File > Open / Open Recent switch databases with `open`.
+    pub fn with_opener(
+        mut self,
+        db: PathBuf,
+        open: impl Fn(&Path) -> Result<A, String> + 'static,
+    ) -> Self {
+        self.settings.push_recent(&db);
+        self.db = Some(db);
+        self.opener = Some(Box::new(open));
+        self
+    }
+
     /// The command palette (tests inspect which form a gesture opened).
     pub fn palette(&self) -> &Palette {
         &self.palette
+    }
+
+    /// Which Help dialog is open.
+    pub fn help_open(&self) -> Option<Dialog> {
+        self.help.open
+    }
+
+    /// Choose a menu item as if clicked; applied on the next frame (tests, automation).
+    pub fn trigger(&mut self, p: Picked) {
+        self.pending.push(p);
+    }
+
+    /// Find a menu item by its path of labels, e.g. `["File", "Export..."]`.
+    pub fn menu_item(&self, path: &[&str]) -> Option<Item> {
+        let f = self.frame();
+        let menus = self.build_menus(&f, &self.app.nav(&f), false);
+        let (first, rest) = path.split_first()?;
+        let mut items = &menus.iter().find(|m| m.title == *first)?.items;
+        let mut found = None;
+        for (i, label) in rest.iter().enumerate() {
+            let it = items.iter().find(|it| it.label == *label)?;
+            if i + 1 == rest.len() {
+                found = Some(it.clone());
+            } else if let menu::Kind::Submenu(c) = &it.kind {
+                items = c;
+            } else {
+                return None;
+            }
+        }
+        found
+    }
+
+    /// The whole menu bar as it would be drawn now.
+    pub fn menus(&self) -> Vec<Menu> {
+        let f = self.frame();
+        self.build_menus(&f, &self.app.nav(&f), false)
+    }
+
+    fn frame(&self) -> Frame {
+        Frame {
+            lang_de: self.settings.lang != "en",
+            dark: self.settings.dark,
+            calls: Vec::new(),
+            forms: Vec::new(),
+            goto: None,
+            toast: Vec::new(),
+            search: self.search.clone(),
+        }
+    }
+
+    /// File, Edit, View, app menus, Window, Help.
+    fn build_menus(&self, f: &Frame, nav: &[NavEntry], text_focus: bool) -> Vec<Menu> {
+        let de = f.lang_de;
+        let t = |a: &str, b: &str| if de { a.to_string() } else { b.to_string() };
+        let am = self.app.menus(f);
+        let cmd = Modifiers::COMMAND;
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+
+        // File
+        let mut file = am.file_new;
+        if !file.is_empty() {
+            file.push(Item::sep());
+        }
+        let can_open = self.opener.is_some();
+        file.push(
+            Item::action(
+                t("Datenbank öffnen...", "Open Database..."),
+                "shell.open_db",
+            )
+            .key(cmd_shift, Key::O)
+            .enabled(can_open),
+        );
+        let mut recent: Vec<Item> = self
+            .settings
+            .recent
+            .iter()
+            .map(|r| Item::action(r.clone(), &format!("shell.recent:{r}")).enabled(can_open))
+            .collect();
+        if recent.is_empty() {
+            recent.push(Item::action(t("(leer)", "(empty)"), "shell.none").enabled(false));
+        } else {
+            recent.push(Item::sep());
+            recent.push(Item::action(
+                t("Liste leeren", "Clear Recent Files"),
+                "shell.clear_recent",
+            ));
+        }
+        file.push(Item::sub(t("Zuletzt geöffnet", "Open Recent"), recent));
+        file.push(Item::action(t("Speichern", "Save"), "shell.save").key(cmd, Key::S));
+        if let Some(sa) = am.save_as {
+            file.push(sa.key(cmd_shift, Key::S));
+        }
+        if !am.export.is_empty() {
+            file.push(Item::sep());
+            file.extend(am.export);
+        }
+        file.push(Item::sep());
+        file.push(Item::action(t("Schließen", "Close"), "shell.close").key(cmd, Key::W));
+        file.push(Item::action(t("Beenden", "Quit"), "shell.quit").key(cmd, Key::Q));
+
+        // Edit: Undo/Redo keys belong to a focused text field.
+        let undo = self.app.undo_label();
+        let redo = self.app.redo_label();
+        let mut u = Item::action(
+            undo.clone()
+                .map(|l| format!("{} {l}", t("Rückgängig:", "Undo")))
+                .unwrap_or_else(|| t("Rückgängig", "Undo")),
+            "shell.undo",
+        )
+        .enabled(undo.is_some())
+        .hint(t("Nichts rückgängig zu machen", "Nothing to undo"));
+        let mut r = Item::action(
+            redo.clone()
+                .map(|l| format!("{} {l}", t("Wiederholen:", "Redo")))
+                .unwrap_or_else(|| t("Wiederholen", "Redo")),
+            "shell.redo",
+        )
+        .enabled(redo.is_some())
+        .hint(t("Nichts zu wiederholen", "Nothing to redo"));
+        if text_focus {
+            u = u.key_text("Ctrl+Z");
+            r = r.key_text("Ctrl+Y");
+        } else {
+            u = u.key(cmd, Key::Z);
+            r = r.key(cmd, Key::Y);
+        }
+        let edit = vec![
+            u,
+            r,
+            Item::sep(),
+            Item::action(t("Ausschneiden", "Cut"), "shell.cut").key_text("Ctrl+X"),
+            Item::action(t("Kopieren", "Copy"), "shell.copy").key_text("Ctrl+C"),
+            Item::action(t("Einfügen", "Paste"), "shell.paste").key_text("Ctrl+V"),
+            Item::action(t("Alles auswählen", "Select All"), "shell.select_all").key_text("Ctrl+A"),
+            Item::sep(),
+            Item::action(t("Einstellungen...", "Preferences..."), "shell.prefs")
+                .key(cmd, Key::Comma),
+        ];
+
+        // View
+        let mut view = if am.view.is_empty() {
+            nav.iter()
+                .enumerate()
+                .map(|(i, n)| Item::view(n.label.clone(), i))
+                .collect()
+        } else {
+            am.view
+        };
+        let dark = self.settings.dark;
+        view.extend([
+            Item::sep(),
+            Item::action(t("Vergrößern", "Zoom In"), "shell.zoom_in").key_text("Ctrl+="),
+            Item::action(t("Verkleinern", "Zoom Out"), "shell.zoom_out").key_text("Ctrl+-"),
+            Item::action(t("Zoom 100%", "Reset Zoom (100%)"), "shell.zoom_reset")
+                .key_text("Ctrl+0"),
+            Item::sep(),
+            Item::sub(
+                t("Farbschema", "Interface Theme"),
+                vec![
+                    Item::action(t("Dunkel", "Dark"), "shell.theme_dark").checked(dark),
+                    Item::action(t("Hell", "Light"), "shell.theme_light").checked(!dark),
+                ],
+            ),
+            Item::sub(
+                t("Sprache", "Language"),
+                vec![
+                    Item::action("Deutsch", "shell.lang_de").checked(de),
+                    Item::action("English", "shell.lang_en").checked(!de),
+                ],
+            ),
+            Item::action(t("Neu laden", "Reload"), "shell.reload").key(Modifiers::NONE, Key::F5),
+        ]);
+
+        // Window
+        let l = self.settings.layout;
+        let mut window = vec![
+            Item::action(
+                t("Layout zurücksetzen", "Reset Layout"),
+                "shell.layout_reset",
+            ),
+            Item::sep(),
+            Item::action(
+                t("Navigationsleiste", "Navigation Rail"),
+                "shell.toggle_nav",
+            )
+            .checked(l.nav),
+            Item::action(t("Schnellleiste", "Quick View Row"), "shell.toggle_quick")
+                .checked(l.quick),
+            Item::action(t("Detailbereich", "Detail Panel"), "shell.toggle_detail")
+                .checked(l.detail),
+            Item::action(t("Signale", "Signals Dock"), "shell.toggle_dock").checked(self.dock.open),
+            Item::action(t("Statusleiste", "Status Bar"), "shell.toggle_status").checked(l.status),
+        ];
+        if !am.window.is_empty() {
+            window.push(Item::sep());
+            window.extend(am.window);
+        }
+
+        // Help: the five-item suite.
+        let help = vec![
+            Item::action(t("Befehle...", "Command Palette..."), "shell.palette").key(cmd, Key::K),
+            Item::action(
+                t("Tastenkürzel...", "Keyboard Shortcuts..."),
+                "shell.shortcuts",
+            )
+            .key(Modifiers::NONE, Key::F1),
+            Item::action(
+                t("Projektdateien und Doku...", "Project Files & Docs..."),
+                "shell.docs",
+            ),
+            Item::action(
+                t("Lizenzen und Hinweise...", "Licenses & Notices..."),
+                "shell.licenses",
+            ),
+            Item::action(
+                format!("{} {}", t("Über", "About"), self.app.name()),
+                "shell.about",
+            ),
+        ];
+
+        let mut menus = vec![
+            Menu::new(t("Datei", "File"), file),
+            Menu::new(t("Bearbeiten", "Edit"), edit),
+            Menu::new(t("Ansicht", "View"), view),
+        ];
+        menus.extend(am.middle);
+        menus.push(Menu::new(t("Fenster", "Window"), window));
+        menus.push(Menu::new(t("Hilfe", "Help"), help));
+        menus
+    }
+
+    /// The shortcut sheet: every menu key plus the keys views and the shell handle.
+    pub fn shortcut_rows(&self) -> Vec<ShortcutRow> {
+        let f = self.frame();
+        let de = f.lang_de;
+        let menus = self.build_menus(&f, &self.app.nav(&f), false);
+        let mut rows = Vec::new();
+        fn walk(
+            ctx_fmt: &dyn Fn(&egui::KeyboardShortcut) -> String,
+            group: &str,
+            items: &[Item],
+            rows: &mut Vec<ShortcutRow>,
+        ) {
+            for it in items {
+                if let menu::Kind::Submenu(c) = &it.kind {
+                    walk(ctx_fmt, group, c, rows);
+                    continue;
+                }
+                let keys = it
+                    .shortcut
+                    .as_ref()
+                    .map(ctx_fmt)
+                    .or_else(|| it.shortcut_text.clone());
+                if let Some(k) = keys {
+                    rows.push((group.to_string(), k, it.label.clone()));
+                }
+            }
+        }
+        let fmt = |s: &egui::KeyboardShortcut| s.format(&egui::ModifierNames::NAMES, false);
+        for m in &menus {
+            walk(&fmt, &m.title, &m.items, &mut rows);
+        }
+        let g = if de { "Allgemein" } else { "General" };
+        for (k, w) in [
+            (
+                "Ctrl+Shift+P",
+                if de {
+                    "Befehle (wie Ctrl+K)"
+                } else {
+                    "Command palette (same as Ctrl+K)"
+                },
+            ),
+            (
+                "Ctrl+/",
+                if de {
+                    "Tastenkürzel (wie F1)"
+                } else {
+                    "Keyboard shortcuts (same as F1)"
+                },
+            ),
+            ("Ctrl+Mouse wheel", if de { "Zoomen" } else { "Zoom" }),
+            (
+                "Esc",
+                if de {
+                    "Dialog schließen"
+                } else {
+                    "Close a dialog"
+                },
+            ),
+        ] {
+            rows.push((g.to_string(), k.to_string(), w.to_string()));
+        }
+        rows.extend(self.app.extra_shortcuts(de));
+        rows
+    }
+
+    fn reopen(&mut self, path: PathBuf) {
+        let Some(open) = &self.opener else {
+            self.toasts.err("this window cannot switch databases");
+            return;
+        };
+        match open(&path) {
+            Ok(app) => {
+                self.app = app;
+                self.view = 0;
+                self.result = None;
+                self.settings.push_recent(&path);
+                self.toasts.ok(format!("opened {}", path.display()));
+                self.db = Some(path);
+                self.save_settings();
+                if let Err(e) = self.app.reload() {
+                    self.toasts.err(e);
+                }
+            }
+            Err(e) => self.toasts.err(format!("{}: {e}", path.display())),
+        }
+    }
+
+    fn edit_op(&mut self, ctx: &Context, op: EditOp) {
+        if let Some(id) = self.last_focus {
+            self.pending_edit = Some((id, op));
+            ctx.request_repaint();
+            return;
+        }
+        let de = self.settings.lang != "en";
+        if op == EditOp::Copy {
+            if let Some(text) = self.app.copy_text(self.view) {
+                ctx.copy_text(text);
+                self.toasts.ok(if de { "kopiert" } else { "copied" });
+                return;
+            }
+        }
+        self.toasts.push(
+            if de {
+                "Zuerst ein Textfeld anklicken"
+            } else {
+                "Click into a text field first"
+            },
+            Tone::Neutral,
+        );
+    }
+
+    /// Apply a chosen menu item.
+    fn handle_pick(&mut self, ctx: &Context, p: Picked, f: &mut Frame) {
+        match p {
+            Picked::Run(tool, args) => f.calls.push(Call {
+                tool,
+                args,
+                label: String::new(),
+                show: true,
+                confirm: None,
+            }),
+            Picked::Form(tool, prefill) => f.forms.push((tool, prefill)),
+            Picked::View(v) => f.goto = Some(v),
+            Picked::Action(id) => {
+                if let Some(rest) = id.strip_prefix("shell.") {
+                    self.shell_action(ctx, rest, f);
+                } else {
+                    self.app.menu_action(&id, f);
+                }
+            }
+        }
+    }
+
+    fn shell_action(&mut self, ctx: &Context, id: &str, f: &mut Frame) {
+        let de = f.lang_de;
+        let mut layout_changed = false;
+        match id {
+            "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            "close" => {
+                self.app.close();
+                self.view = 0;
+                self.result = None;
+                self.help.open = None;
+                self.palette.close();
+            }
+            "save" => {
+                self.save_settings();
+                match self.app.save() {
+                    Ok(m) => self.toasts.ok(m),
+                    Err(e) => self.toasts.err(e),
+                }
+            }
+            "open_db" => {
+                let mut dlg = rfd::FileDialog::new()
+                    .add_filter("SQLite", &["db", "sqlite", "sqlite3"])
+                    .add_filter(if de { "Alle Dateien" } else { "All files" }, &["*"]);
+                if let Some(dir) = self.db.as_deref().and_then(Path::parent) {
+                    dlg = dlg.set_directory(dir);
+                }
+                if let Some(p) = dlg.pick_file() {
+                    self.reopen(p);
+                }
+            }
+            "clear_recent" => {
+                self.settings.recent.clear();
+                if let Some(db) = self.db.clone() {
+                    self.settings.push_recent(&db);
+                }
+                self.save_settings();
+            }
+            "undo" | "redo" => {
+                let r = if id == "undo" {
+                    self.app.undo()
+                } else {
+                    self.app.redo()
+                };
+                match r {
+                    Ok(m) => self.toasts.ok(m),
+                    Err(e) => self.toasts.err(e),
+                }
+                if let Err(e) = self.app.reload() {
+                    self.toasts.err(e);
+                }
+            }
+            "cut" => self.edit_op(ctx, EditOp::Cut),
+            "copy" => self.edit_op(ctx, EditOp::Copy),
+            "paste" => self.edit_op(ctx, EditOp::Paste),
+            "select_all" => self.edit_op(ctx, EditOp::SelectAll),
+            "prefs" => match self.app.preferences_view() {
+                Some(v) => f.goto = Some(v),
+                None => self.help.open(Dialog::Preferences),
+            },
+            "zoom_in" | "zoom_out" | "zoom_reset" => {
+                let z = match id {
+                    "zoom_in" => ctx.zoom_factor() * 1.1,
+                    "zoom_out" => ctx.zoom_factor() / 1.1,
+                    _ => 1.0,
+                }
+                .clamp(shell::ZOOM_MIN, shell::ZOOM_MAX);
+                ctx.set_zoom_factor(z);
+                self.settings.zoom = z;
+                self.save_settings();
+            }
+            "theme_dark" | "theme_light" => {
+                shell::set_dark(ctx, &mut self.settings, id == "theme_dark");
+                self.save_settings();
+            }
+            "lang_de" | "lang_en" => {
+                self.settings.lang = if id == "lang_de" { "de" } else { "en" }.into();
+                self.save_settings();
+            }
+            "reload" => {
+                match self.app.reload() {
+                    Ok(()) => self.toasts.ok(if de { "neu geladen" } else { "reloaded" }),
+                    Err(e) => self.toasts.err(e),
+                }
+                self.dock.refresh(self.app.bus(), self.app.id(), true);
+            }
+            "layout_reset" => {
+                self.settings.layout = shell::Layout::default();
+                self.dock.open = false;
+                layout_changed = true;
+            }
+            "toggle_nav" => {
+                self.settings.layout.nav = !self.settings.layout.nav;
+                layout_changed = true;
+            }
+            "toggle_quick" => {
+                self.settings.layout.quick = !self.settings.layout.quick;
+                layout_changed = true;
+            }
+            "toggle_detail" => {
+                self.settings.layout.detail = !self.settings.layout.detail;
+                layout_changed = true;
+            }
+            "toggle_status" => {
+                self.settings.layout.status = !self.settings.layout.status;
+                layout_changed = true;
+            }
+            "toggle_dock" => {
+                self.dock.open = !self.dock.open;
+                self.dock.refresh(self.app.bus(), self.app.id(), true);
+            }
+            "palette" => self.palette.open_list(),
+            "shortcuts" => self.help.open(Dialog::Shortcuts),
+            "docs" => self.help.open(Dialog::Docs),
+            "licenses" => self.help.open(Dialog::Licenses),
+            "about" => self.help.open(Dialog::About),
+            "none" => {}
+            other => {
+                if let Some(p) = other.strip_prefix("recent:") {
+                    self.reopen(PathBuf::from(p));
+                } else {
+                    self.toasts.err(format!("unknown menu action {other}"));
+                }
+            }
+        }
+        if layout_changed {
+            self.save_settings();
+        }
     }
 
     /// Run a tool exactly as a view button would (tests, automation).
@@ -408,6 +1019,11 @@ impl<A: SuiteApp> Shell<A> {
         if shell::handle_zoom(&ctx, &mut self.settings).is_some() {
             self.save_settings();
         }
+        // Esc closes a Help dialog before anything else can take the key.
+        if self.help.is_open() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.help.open = None;
+        }
+        self.app.set_lang(self.settings.lang != "en");
         self.palette.handle_shortcut(&ctx);
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F5)) {
             match self.app.reload() {
@@ -419,20 +1035,100 @@ impl<A: SuiteApp> Shell<A> {
         self.dock.refresh(self.app.bus(), self.app.id(), false);
         self.palette.prefill = self.app.prefill();
 
-        let mut f = Frame {
-            lang_de: self.settings.lang != "en",
-            dark: self.settings.dark,
-            calls: Vec::new(),
-            forms: Vec::new(),
-            goto: None,
-            toast: Vec::new(),
-            search: self.search.clone(),
-        };
+        // Edit menu: remember the text field that had focus, and apply a
+        // pending Cut/Copy/Paste/Select All to it before widgets run.
+        let focused = ctx.memory(|m| m.focused());
+        if let Some(id) = focused {
+            self.last_focus = Some(id);
+            self.last_sel =
+                egui::TextEdit::load_state(&ctx, id).and_then(|s| s.cursor.char_range());
+        }
+        if let Some((id, op)) = self.pending_edit.take() {
+            ctx.memory_mut(|m| m.request_focus(id));
+            // Put back the selection the field had before the menu took focus.
+            if let (Some(range), Some(mut st)) =
+                (self.last_sel, egui::TextEdit::load_state(&ctx, id))
+            {
+                st.cursor.set_char_range(Some(range));
+                st.store(&ctx, id);
+            }
+            match op {
+                EditOp::Paste => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+                EditOp::Copy => ctx.input_mut(|i| i.events.push(egui::Event::Copy)),
+                EditOp::Cut => ctx.input_mut(|i| i.events.push(egui::Event::Cut)),
+                EditOp::SelectAll => ctx.input_mut(|i| {
+                    i.events.push(egui::Event::Key {
+                        key: Key::A,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::COMMAND,
+                    })
+                }),
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)) {
+            self.palette.open_list();
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Slash)) {
+            self.help.open(Dialog::Shortcuts);
+        }
+
+        let mut f = self.frame();
         let nav = self.app.nav(&f);
         if self.view >= nav.len() {
             self.view = 0;
         }
         let t = theme::current(&ctx);
+
+        let menus = self.build_menus(&f, &nav, focused.is_some());
+        let mut picks = std::mem::take(&mut self.pending);
+        if !self.help.is_open() {
+            if let Some(p) = menu::consume_shortcuts(&ctx, &menus) {
+                picks.push(p);
+            }
+        }
+        egui::Panel::top("suite_menu")
+            .frame(
+                egui::Frame::new()
+                    .fill(t.surface)
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
+            )
+            .show(ui, |ui| {
+                if let Some(p) = menu::bar(ui, &menus) {
+                    picks.push(p);
+                }
+            });
+        for p in picks {
+            self.handle_pick(&ctx, p, &mut f);
+        }
+        if self.settings.layout.quick {
+            egui::Panel::top("suite_quick")
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.canvas)
+                        .inner_margin(egui::Margin::symmetric(12, 4))
+                        .stroke(egui::Stroke::new(1.0, t.border)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (i, n) in nav.iter().enumerate() {
+                            let label = format!("{}  {}", n.icon, n.label);
+                            if ui
+                                .selectable_label(i == self.view, label)
+                                .on_hover_text(if f.lang_de {
+                                    "Ansicht wechseln (auch im Menü Ansicht)"
+                                } else {
+                                    "Switch view (also in the View menu)"
+                                })
+                                .clicked()
+                            {
+                                self.view = i;
+                            }
+                        }
+                    });
+                });
+        }
 
         egui::Panel::top("suite_top")
             .frame(
@@ -512,31 +1208,33 @@ impl<A: SuiteApp> Shell<A> {
         f.search = self.search.clone();
 
         let mut status = shell::StatusClick::default();
-        egui::Panel::bottom("suite_status")
-            .frame(
-                egui::Frame::new()
-                    .fill(t.surface)
-                    .inner_margin(egui::Margin::symmetric(12, 4))
-                    .stroke(egui::Stroke::new(1.0, t.border)),
-            )
-            .show(ui, |ui| {
-                let info = format!("{}  v{}", self.app.status_info(), self.app.version());
-                let msg = self.toasts.latest().map(|(m, tone)| (m.to_string(), tone));
-                ui.horizontal(|ui| {
-                    let lang = if f.lang_de { "Deutsch" } else { "English" };
-                    if ui.button(lang).on_hover_text("Deutsch / English").clicked() {
-                        self.settings.lang = if f.lang_de { "en".into() } else { "de".into() };
-                        self.save_settings();
-                    }
-                    status = shell::status_bar(
-                        ui,
-                        msg.as_ref().map(|(m, t)| (m.as_str(), *t)),
-                        ctx.zoom_factor(),
-                        self.settings.dark,
-                        &info,
-                    );
+        if self.settings.layout.status {
+            egui::Panel::bottom("suite_status")
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.surface)
+                        .inner_margin(egui::Margin::symmetric(12, 4))
+                        .stroke(egui::Stroke::new(1.0, t.border)),
+                )
+                .show(ui, |ui| {
+                    let info = format!("{}  v{}", self.app.status_info(), self.app.version());
+                    let msg = self.toasts.latest().map(|(m, tone)| (m.to_string(), tone));
+                    ui.horizontal(|ui| {
+                        let lang = if f.lang_de { "Deutsch" } else { "English" };
+                        if ui.button(lang).on_hover_text("Deutsch / English").clicked() {
+                            self.settings.lang = if f.lang_de { "en".into() } else { "de".into() };
+                            self.save_settings();
+                        }
+                        status = shell::status_bar(
+                            ui,
+                            msg.as_ref().map(|(m, t)| (m.as_str(), *t)),
+                            ctx.zoom_factor(),
+                            self.settings.dark,
+                            &info,
+                        );
+                    });
                 });
-            });
+        }
         if status.toggle_theme {
             let d = !self.settings.dark;
             shell::set_dark(&ctx, &mut self.settings, d);
@@ -548,28 +1246,31 @@ impl<A: SuiteApp> Shell<A> {
             self.save_settings();
         }
 
-        egui::Panel::left("suite_nav")
-            .resizable(false)
-            .exact_size(214.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.surface)
-                    .inner_margin(egui::Margin::symmetric(10, 10))
-                    .stroke(egui::Stroke::new(1.0, t.border)),
-            )
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (i, n) in nav.iter().enumerate() {
-                        if let Some(g) = &n.group {
-                            shell::nav_caption(ui, g);
+        if self.settings.layout.nav {
+            egui::Panel::left("suite_nav")
+                .resizable(false)
+                .exact_size(214.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.surface)
+                        .inner_margin(egui::Margin::symmetric(10, 10))
+                        .stroke(egui::Stroke::new(1.0, t.border)),
+                )
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (i, n) in nav.iter().enumerate() {
+                            if let Some(g) = &n.group {
+                                shell::nav_caption(ui, g);
+                            }
+                            if shell::nav_item(ui, n.icon, &n.label, i == self.view, n.badge)
+                                .clicked()
+                            {
+                                self.view = i;
+                            }
                         }
-                        if shell::nav_item(ui, n.icon, &n.label, i == self.view, n.badge).clicked()
-                        {
-                            self.view = i;
-                        }
-                    }
+                    });
                 });
-            });
+        }
 
         if self.dock.open {
             let (consumes, emits) = self.app.wiring();
@@ -610,7 +1311,7 @@ impl<A: SuiteApp> Shell<A> {
                 }
                 None => {}
             }
-        } else if self.app.has_detail(self.view) {
+        } else if self.settings.layout.detail && self.app.has_detail(self.view) {
             egui::Panel::right("suite_detail")
                 .resizable(true)
                 .default_size(400.0)
@@ -658,6 +1359,35 @@ impl<A: SuiteApp> Shell<A> {
                 self.palette.open_tool(tl);
             } else {
                 self.toasts.err(format!("unknown tool {tool}"));
+            }
+        }
+        // Help dialogs.
+        if self.help.is_open() {
+            let info = self.app.info();
+            let rows = self.shortcut_rows();
+            let docs = self.app.docs();
+            let ch = help::show(
+                &ctx,
+                &mut self.help,
+                &info,
+                &rows,
+                &docs,
+                f.lang_de,
+                self.settings.dark,
+                ctx.zoom_factor(),
+            );
+            if let Some(d) = ch.dark {
+                shell::set_dark(&ctx, &mut self.settings, d);
+            }
+            if let Some(en) = ch.lang_en {
+                self.settings.lang = if en { "en" } else { "de" }.into();
+            }
+            if let Some(z) = ch.zoom {
+                ctx.set_zoom_factor(z);
+                self.settings.zoom = z;
+            }
+            if ch.dark.is_some() || ch.lang_en.is_some() || ch.zoom.is_some() {
+                self.save_settings();
             }
         }
         if let Some((tool, v)) = &self.result {
@@ -726,10 +1456,72 @@ impl<A: SuiteApp> Shell<A> {
         }
     }
 
-    /// `--smoke`: run the status tool and print it.
+    /// `--smoke`: run the status tool, then check the menu bar without a
+    /// window: every menu command is a real tool with real argument names,
+    /// no shortcut is used twice, every label has glyphs in the loaded fonts.
     pub fn smoke(&mut self) -> Result<Value, String> {
         let tool = self.app.smoke_tool();
-        self.app.call(tool, &serde_json::json!({}))
+        let mut v = self.app.call(tool, &serde_json::json!({}))?;
+        let check = self.menu_check()?;
+        if let Some(o) = v.as_object_mut() {
+            o.insert("menu_check".into(), check);
+        }
+        Ok(v)
+    }
+
+    /// Menu parity and tofu guard (both languages). Err lists every problem.
+    pub fn menu_check(&mut self) -> Result<Value, String> {
+        let ctx = Context::default();
+        theme::install_fonts(&ctx);
+        let mut warm = ctx.run_ui(egui::RawInput::default(), |_| {});
+        warm.textures_delta.clear();
+        let tools = self.app.tools();
+        let lang = self.settings.lang.clone();
+        let mut out = serde_json::Map::new();
+        let mut errors = Vec::new();
+        for l in ["de", "en"] {
+            self.settings.lang = l.into();
+            let menus = self.menus();
+            let n_tools = menu::parity(&menus, &tools).map_err(|e| format!("[{l}] {e}"));
+            let mut extra: Vec<String> = self
+                .shortcut_rows()
+                .into_iter()
+                .flat_map(|(g, k, w)| [g, k, w])
+                .collect();
+            let f = self.frame();
+            extra.extend(
+                self.app
+                    .nav(&f)
+                    .into_iter()
+                    .flat_map(|n| [n.icon.to_string(), n.label]),
+            );
+            let tofu = menu::tofu_report(&ctx, &menus, &extra);
+            // Glyph lookups may queue font-atlas updates; nobody renders them.
+            let mut drain = ctx.run_ui(egui::RawInput::default(), |_| {});
+            drain.textures_delta.clear();
+            match n_tools {
+                Ok(n) => {
+                    out.insert(
+                        l.into(),
+                        serde_json::json!({
+                            "menus": menus.iter().map(|m| m.title.clone()).collect::<Vec<_>>(),
+                            "items": menu::leaves(&menus).len(),
+                            "tool_items": n,
+                        }),
+                    );
+                }
+                Err(e) => errors.push(e),
+            }
+            for (s, chars) in tofu {
+                errors.push(format!("[{l}] tofu in {s:?}: {chars:?}"));
+            }
+        }
+        self.settings.lang = lang;
+        if errors.is_empty() {
+            Ok(Value::Object(out))
+        } else {
+            Err(errors.join("\n"))
+        }
     }
 
     /// Run the window (blocks until closed).
@@ -756,9 +1548,9 @@ impl<A: SuiteApp> eframe::App for Shell<A> {
 
 /// Standard `main` body: parse args, open the app with `open(db)`, optional
 /// demo seed, smoke or window. Returns the process exit code.
-pub fn main_with<A: SuiteApp>(
+pub fn main_with<A: SuiteApp + 'static>(
     default_db: PathBuf,
-    open: impl FnOnce(&std::path::Path) -> Result<A, String>,
+    open: impl Fn(&std::path::Path) -> Result<A, String> + 'static,
     demo_tool: &str,
 ) -> std::process::ExitCode {
     use std::process::ExitCode;
@@ -786,7 +1578,9 @@ pub fn main_with<A: SuiteApp>(
             eprintln!("demo seed: {e}");
         }
     }
-    let mut sh = Shell::new(app, Some(shell::settings_path(&db))).with_args(&args);
+    let mut sh = Shell::new(app, Some(shell::settings_path(&db)))
+        .with_args(&args)
+        .with_opener(db.clone(), open);
     if args.smoke {
         return match sh.smoke() {
             Ok(v) => {
