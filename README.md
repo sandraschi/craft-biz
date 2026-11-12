@@ -1,8 +1,14 @@
 # craft-biz
 
+![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)
+![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)
+![MCP stdio](https://img.shields.io/badge/MCP-stdio-purple)
+![ArtCraft harness](https://img.shields.io/badge/ArtCraft-harness-green)
+
 Shared kernel for the fleet's back-office craft apps (buchcraft, taskcraft,
 teamcraft, assetcraft, contractcraft, deskcraft, gaincraft, formcraft,
-wikicraft). Library only: no binary, no UI, no ports.
+wikicraft). Two library crates, no binary, no ports: `craft-biz` (the kernel
+below) and `craft-biz-ui` (the shared egui window every suite app runs in).
 
 Plan and rationale: `mcp-central-docs/projects/craft-fleet-expansion/BACKOFFICE_CRAFT_SUITE.md`.
 
@@ -15,6 +21,16 @@ Plan and rationale: `mcp-central-docs/projects/craft-fleet-expansion/BACKOFFICE_
 | `bus` | File outbox/inbox/ack event bus between apps, atomic writes, path-traversal fence, junk quarantine |
 | `mcp` | The single MCP 2024-11-05 stdio loop (`ToolHost` trait), pure `handle_line` for tests |
 | `i18n` | `Locale` En/De, date and money formatting |
+
+`craft-biz-ui` (egui 0.37, wgpu):
+
+| Module | What it gives the apps |
+|---|---|
+| `app` | `Shell` + `SuiteApp`: the whole window frame (nav rail, quick view row, top bar, status bar, palette, signals dock, confirmations, `ui.json`, `--smoke`, `--screenshot`); `main_with` is an app's entire `main` |
+| `menu` | Craft Menu Bar Standard bar: File / Edit / View / app menus / Window / Help, switch-on-hover, shortcuts, smoke parity, tofu guard against the loaded fonts |
+| `help` | Help suite dialogs: keyboard shortcuts, project docs, licenses, about, preferences |
+| `theme`, `shell`, `widgets` | High-contrast light/dark tokens (contrast tested), Ctrl+wheel zoom, toasts, pills, meters, cards |
+| `kanban`, `table`, `palette`, `signals`, `coverage` | Board with rules and drag and drop, virtual table, Ctrl+K forms from MCP schemas, bus dock, "every tool has a place" test helper |
 
 Secrets are not here: apps depend on `craft-secrets` from the splatcraft repo
 (env var first, then Windows Credential Manager).
@@ -34,7 +50,7 @@ let tax = Money::tax_from_net(net, TaxKey::V20.rate_pct())?; // 200,00
 
 ## Status
 
-v0.1.0, 26 tests, clippy `-D warnings` clean with unwrap/expect/panic denied.
+v0.1.0, 51 tests (33 kernel, 18 UI incl. headless drag and drop and menu parity), clippy `-D warnings` clean with unwrap/expect/panic denied and `unsafe_code` forbidden.
 Real logic throughout; nothing here is a demo or stub. The EKR seed chart is
 data to be checked against your Steuerberater's chart, not an authority.
 
