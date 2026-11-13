@@ -8,10 +8,12 @@
 //! - [`signals`]: bus dock (waiting, applied, rejected, sent) with drain and retry.
 //! - [`coverage`]: test helper proving every MCP tool has a place in the window.
 //! - [`menu`]: Craft Menu Bar Standard bar, shortcuts, smoke parity, tofu guard.
+//! - [`bookend`]: the same File / Edit / View / Window / Help bar for a window that does not use the shell.
 //! - [`help`]: Help suite dialogs (shortcuts, docs, licenses, about, preferences).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod app;
+pub mod bookend;
 pub mod coverage;
 pub mod help;
 pub mod kanban;

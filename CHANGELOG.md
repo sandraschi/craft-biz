@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `craft-biz-ui::bookend`: File, Edit, View, Window, and Help for a window that does not use the suite shell. Help opens the five standard dialogs. Zoom and theme change the window. Canvas items that the window does not have stay disabled.
+
 - `craft-biz-ui::menu`: Craft Menu Bar Standard bar for every suite window. The shell owns the bookends (File: open database, open recent, save, close, quit; Edit: undo / redo, cut / copy / paste / select all, preferences; View: zoom, theme, language, reload; Window: panel toggles, reset layout; Help: the five-item suite) and apps add their own items and middle menus through `SuiteApp::menus` (`AppMenus`). `switch_on_hover`, global shortcuts (`consume_shortcuts`), `parity` (menu items name real tools and real arguments, no duplicate shortcuts) and a real tofu guard (`missing_glyphs` asks the loaded fonts, not just for U+FFFD).
 - `craft-biz-ui::help`: Keyboard Shortcuts (generated from the menus, filterable), Project Files & Docs (`Doc::embedded` so installed apps have their docs), Licenses & Notices (`AppInfo::third_party`), About (version, commit, build date), Preferences (theme, language, zoom). Esc closes.
 - `Shell`: quick view row, Window toggles persisted in `ui.json` (`Layout`), recent databases (`UiSettings::recent`), `with_opener` so File > Open switches databases, `--smoke` adds `menu_check` (parity + tofu, DE and EN). Edit operations restore the focused text field and its selection after the menu took focus (egui collapses it). New optional `SuiteApp` hooks with defaults: `menus`, `menu_action`, `set_lang`, `undo`/`redo` + labels, `copy_text`, `save`, `close`, `preferences_view`, `info`, `docs`, `extra_shortcuts`; existing apps compile unchanged and get the bookend menus.
