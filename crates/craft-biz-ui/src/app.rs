@@ -79,6 +79,19 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// A frame with no queued calls. Tests use it to draw one page.
+    pub fn idle() -> Frame {
+        Frame {
+            lang_de: false,
+            dark: false,
+            calls: Vec::new(),
+            forms: Vec::new(),
+            goto: None,
+            toast: Vec::new(),
+            search: String::new(),
+        }
+    }
+
     /// Pick the German or English text.
     pub fn t<'a>(&self, de: &'a str, en: &'a str) -> &'a str {
         if self.lang_de {
