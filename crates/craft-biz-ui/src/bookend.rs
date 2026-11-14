@@ -155,7 +155,7 @@ impl Bar {
         }
         let mut open = true;
         let mut chosen: Option<Picked> = None;
-        egui::Window::new(format!("Command Palette — {}", spec.name))
+        egui::Window::new(format!("Command Palette - {}", spec.name))
             .collapsible(false)
             .open(&mut open)
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 48.0))
