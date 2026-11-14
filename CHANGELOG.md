@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Docs: README "Planned: skills and in-app chat" (MCP resources for bundled skills, `<app>_skill_read`, `read_only` tool flag, Window > Chat, Skills help tab), per `CRAFT_SKILLS_AND_CHAT_STANDARD.md`. Not built.
+- `craft-biz-ui::bookend`: palette window title uses a hyphen instead of an em dash.
+
 - `craft-biz-ui::bookend`: File, Edit, View, Window, and Help for a window that does not use the suite shell. Help opens the five standard dialogs. Zoom and theme change the window. Canvas items that the window does not have stay disabled.
 
 - `craft-biz-ui::menu`: Craft Menu Bar Standard bar for every suite window. The shell owns the bookends (File: open database, open recent, save, close, quit; Edit: undo / redo, cut / copy / paste / select all, preferences; View: zoom, theme, language, reload; Window: panel toggles, reset layout; Help: the five-item suite) and apps add their own items and middle menus through `SuiteApp::menus` (`AppMenus`). `switch_on_hover`, global shortcuts (`consume_shortcuts`), `parity` (menu items name real tools and real arguments, no duplicate shortcuts) and a real tofu guard (`missing_glyphs` asks the loaded fonts, not just for U+FFFD).

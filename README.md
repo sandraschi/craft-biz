@@ -54,6 +54,15 @@ v0.1.0, 51 tests (33 kernel, 18 UI incl. headless drag and drop and menu parity)
 Real logic throughout; nothing here is a demo or stub. The EKR seed chart is
 data to be checked against your Steuerberater's chart, not an authority.
 
+## Planned: skills and in-app chat (2026-11-14, not built)
+
+Spec: `mcp-central-docs/standards/rust-artcraft/CRAFT_SKILLS_AND_CHAT_STANDARD.md`.
+
+- `mcp`: `ToolHost::skills()` (default empty). When an app bundles skills, the loop also advertises `resources`, answers `resources/list` / `resources/read` with `skill://<name>/SKILL.md`, and adds the tool `<app>_skill_read`. Tool tables gain a `read_only` flag (missing = not read-only), which the chat uses to decide what needs confirmation.
+- `craft-biz-ui`: Window > Chat (`Ctrl+J`) through `craft-ai-ui::ChatPanel` when the app implements `ChatHost`, and a Skills tab in Help > Project Files & Docs.
+- New path dependencies: `craft-skills` and `craft-ai-ui` from the craft-ai repo.
+- Pilot app: taskcraft.
+
 ## Gates
 
 ```powershell
