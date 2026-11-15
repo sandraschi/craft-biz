@@ -30,6 +30,7 @@ Plan and rationale: `mcp-central-docs/projects/craft-fleet-expansion/BACKOFFICE_
 | `menu` | Craft Menu Bar Standard bar: File / Edit / View / app menus / Window / Help, switch-on-hover, shortcuts, smoke parity, tofu guard against the loaded fonts |
 | `help` | Help suite dialogs: keyboard shortcuts, project docs, licenses, about, preferences |
 | `theme`, `shell`, `widgets` | High-contrast light/dark tokens (contrast tested), Ctrl+wheel zoom, toasts, pills, meters, cards |
+| `gantt` | The standalone [`egui_gantt`](https://github.com/sandraschi/egui_gantt) chart in the suite colours (`gantt::style(dark)` / `gantt::current(ctx)`), contrast tested. Needs `../egui_gantt` checked out next to this repo |
 | `kanban`, `table`, `palette`, `signals`, `coverage` | Board with rules and drag and drop, virtual table, Ctrl+K forms from MCP schemas, bus dock, "every tool has a place" test helper |
 
 Secrets are not here: apps depend on `craft-secrets` from the splatcraft repo

@@ -10,11 +10,13 @@
 //! - [`menu`]: Craft Menu Bar Standard bar, shortcuts, smoke parity, tofu guard.
 //! - [`bookend`]: the same File / Edit / View / Window / Help bar for a window that does not use the shell.
 //! - [`help`]: Help suite dialogs (shortcuts, docs, licenses, about, preferences).
+//! - [`gantt`]: the `egui_gantt` chart in the suite colours.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod app;
 pub mod bookend;
 pub mod coverage;
+pub mod gantt;
 pub mod help;
 pub mod kanban;
 pub mod menu;

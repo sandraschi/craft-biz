@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 craft-biz = { path = "../craft-biz" }
+# Standalone Gantt widget, checked out next to this repo (D:\Dev\repos\egui_gantt).
+egui_gantt = { path = "../../../egui_gantt" }
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

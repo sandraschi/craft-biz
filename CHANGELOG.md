@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `craft-biz-ui::gantt`: `egui_gantt` styled from the suite theme tokens (surface, text, grid, accent, danger), with a contrast test for both modes. Path dependency on `../egui_gantt`.
 - Docs: README "Planned: skills and in-app chat" (MCP resources for bundled skills, `<app>_skill_read`, `read_only` tool flag, Window > Chat, Skills help tab), per `CRAFT_SKILLS_AND_CHAT_STANDARD.md`. Not built.
 - `craft-biz-ui::bookend`: palette window title uses a hyphen instead of an em dash.
 
