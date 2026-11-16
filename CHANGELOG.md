@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `company`: one dossier for any small Austrian GmbH or FlexKapG (UID, IBAN, SVNR, Firmenbuch shape, capital at or above the statutory floor, any Austrian seat, Wien PLZ 1010-1230). A live dossier is not written until the founder has acknowledged the preparation guide. `sandrasteve_demo` is labelled demo and is not written unless the caller accepts it. Unpaid capital is reported and not posted. No Lohnverrechnung.
+- Mitarbeiterkarte on each team member: photo, SVNR, address, hire date, position, current-work text, monthly gross stored. `sandrasteve_demo` has two onboarding cards. A Geschaeftsfuehrer without an ASVG wage is not a team card. A `source: hirecraft` card may be incomplete. Payroll is not calculated.
+- `advice`: the Gruendung guide the founder reads before typing a company. GmbH, Gruendungsprivilegierung, FlexKapG. The German UG is named as not an Austrian form.
 - `craft-biz-ui::gantt`: `egui_gantt` styled from the suite theme tokens (surface, text, grid, accent, danger), with a contrast test for both modes. Path dependency on `../egui_gantt`.
 - Docs: README "Planned: skills and in-app chat" (MCP resources for bundled skills, `<app>_skill_read`, `read_only` tool flag, Window > Chat, Skills help tab), per `CRAFT_SKILLS_AND_CHAT_STANDARD.md`. Not built.
 - `craft-biz-ui::bookend`: palette window title uses a hyphen instead of an em dash.

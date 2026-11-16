@@ -22,6 +22,14 @@ pub trait ToolHost {
     fn tools(&self) -> Vec<Value>;
     /// Run a tool. `Ok` value is returned as JSON text; `Err` becomes `isError: true`.
     fn call(&mut self, name: &str, args: &Value) -> Result<Value, String>;
+    /// Optional MCP resources (`uri`, `name`, `description`, `mimeType`).
+    fn resources(&self) -> Vec<Value> {
+        Vec::new()
+    }
+    /// Read a resource by URI. Return `Err(msg)` for unknown URI (`-32002`).
+    fn read_resource(&self, uri: &str) -> Result<Vec<Value>, String> {
+        Err(format!("unknown resource: {uri}"))
+    }
 }
 
 /// Build a tool descriptor.
@@ -128,16 +136,36 @@ pub fn handle_line<H: ToolHost>(host: &mut H, line: &str) -> Option<Value> {
     let params = req.get("params").cloned().unwrap_or(Value::Null);
 
     Some(match method {
-        "initialize" => ok_response(
-            id,
-            json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": host.server_name(), "version": host.server_version() }
-            }),
-        ),
+        "initialize" => {
+            let mut caps = json!({ "tools": { "listChanged": false } });
+            if !host.resources().is_empty() {
+                caps["resources"] = json!({ "listChanged": false });
+            }
+            ok_response(
+                id,
+                json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": caps,
+                    "serverInfo": { "name": host.server_name(), "version": host.server_version() }
+                }),
+            )
+        }
         "ping" => ok_response(id, json!({})),
         "tools/list" => ok_response(id, json!({ "tools": host.tools() })),
+        "resources/list" => ok_response(id, json!({ "resources": host.resources() })),
+        "resources/read" => {
+            let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+                return Some(error_response(
+                    id,
+                    -32602,
+                    "resources/read needs params.uri",
+                ));
+            };
+            match host.read_resource(uri) {
+                Ok(contents) => ok_response(id, json!({ "contents": contents })),
+                Err(msg) => error_response(id, -32002, &msg),
+            }
+        }
         "tools/call" => {
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return Some(error_response(id, -32602, "tools/call needs params.name"));

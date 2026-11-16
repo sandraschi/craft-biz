@@ -16,6 +16,7 @@ Plan and rationale: `mcp-central-docs/projects/craft-fleet-expansion/BACKOFFICE_
 |---|---|
 | `money` | `Money` as i64 cents, ONORM A 1080 format/parse ("1.250,50"), commercial rounding, net/gross/tax split, exact allocation |
 | `at` | Austrian UID (ATU) check-digit validation, IBAN mod-97, DD.MM.YYYY dates |
+| `company` | Dossier for a small Austrian GmbH or FlexKapG, plus the Gruendung guide |
 | `deadline` | Kuendigungsfrist math: last notice date, earliest termination by month/quarter/year end, auto-renewing terms |
 | `ekr` | EKR seed chart (editable starting point), tax keys U20/U10/U13/V20/V10/V13/IGE20 with U30 Kennzahlen |
 | `bus` | File outbox/inbox/ack event bus between apps, atomic writes, path-traversal fence, junk quarantine |

@@ -202,6 +202,8 @@ pub trait SuiteApp {
     fn has_detail(&self, _view: usize) -> bool {
         false
     }
+    /// Right chat dock. Default draws nothing. Shown before the central panel.
+    fn chat_panel(&mut self, _ui: &mut Ui) {}
     /// Extra buttons in the top bar (right side, before the palette button).
     fn top_actions(&mut self, _ui: &mut Ui, _f: &mut Frame) {}
     fn bus(&self) -> &Bus;
@@ -964,7 +966,7 @@ impl<A: SuiteApp> Shell<A> {
                 self.help.open_doc(
                     "Getting Started".into(),
                     format!(
-                        "# Getting Started — {name}\n\n\
+                        "# Getting Started - {name}\n\n\
                          1. Seed demo data from the toolbar or CLI (`{id} seed`).\n\
                          2. Use the left navigation rail to switch between workspace views.\n\
                          3. Press Ctrl+K for the Command Palette or F1 for Keyboard Shortcuts.\n\
@@ -979,7 +981,7 @@ impl<A: SuiteApp> Shell<A> {
                 self.help.open_doc(
                     "Usage & Workflows".into(),
                     format!(
-                        "# Usage & Workflows — {name}\n\n\
+                        "# Usage & Workflows - {name}\n\n\
                          - Local SQLite WAL database: all changes persist immediately.\n\
                          - MCP Server: run `{id} mcp` for stdio JSON-RPC ({tools} tools).\n\
                          - Domino Bus: actions emit events to sibling Craft apps automatically.\n\
@@ -1380,6 +1382,8 @@ impl<A: SuiteApp> Shell<A> {
                         });
                 });
         }
+
+        self.app.chat_panel(ui);
 
         egui::CentralPanel::default()
             .frame(

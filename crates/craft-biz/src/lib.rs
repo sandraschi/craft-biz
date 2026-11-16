@@ -6,8 +6,10 @@
 //! not here.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod advice;
 pub mod at;
 pub mod bus;
+pub mod company;
 pub mod confine;
 pub mod deadline;
 pub mod ekr;
