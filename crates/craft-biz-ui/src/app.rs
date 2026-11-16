@@ -672,7 +672,7 @@ impl<A: SuiteApp> Shell<A> {
             window.extend(am.window);
         }
 
-        // Help: the five-item suite.
+        // Help: the seven-item suite.
         let help = vec![
             Item::action(t("Befehle...", "Command Palette..."), "shell.palette").key(cmd, Key::K),
             Item::action(
@@ -680,6 +680,14 @@ impl<A: SuiteApp> Shell<A> {
                 "shell.shortcuts",
             )
             .key(Modifiers::NONE, Key::F1),
+            Item::action(
+                t("Erste Schritte...", "Getting Started..."),
+                "shell.getting_started",
+            ),
+            Item::action(
+                t("Bedienung & Workflows...", "Usage & Workflows..."),
+                "shell.usage",
+            ),
             Item::action(
                 t("Projektdateien und Doku...", "Project Files & Docs..."),
                 "shell.docs",
@@ -950,6 +958,35 @@ impl<A: SuiteApp> Shell<A> {
             }
             "palette" => self.palette.open_list(),
             "shortcuts" => self.help.open(Dialog::Shortcuts),
+            "getting_started" => {
+                let name = self.app.name();
+                let id = self.app.id();
+                self.help.open_doc(
+                    "Getting Started".into(),
+                    format!(
+                        "# Getting Started — {name}\n\n\
+                         1. Seed demo data from the toolbar or CLI (`{id} seed`).\n\
+                         2. Use the left navigation rail to switch between workspace views.\n\
+                         3. Press Ctrl+K for the Command Palette or F1 for Keyboard Shortcuts.\n\
+                         4. Open Help -> Project Files & Docs... to read embedded README & AGENTS docs."
+                    ),
+                );
+            }
+            "usage" => {
+                let name = self.app.name();
+                let id = self.app.id();
+                let tools = self.app.tools().len();
+                self.help.open_doc(
+                    "Usage & Workflows".into(),
+                    format!(
+                        "# Usage & Workflows — {name}\n\n\
+                         - Local SQLite WAL database: all changes persist immediately.\n\
+                         - MCP Server: run `{id} mcp` for stdio JSON-RPC ({tools} tools).\n\
+                         - Domino Bus: actions emit events to sibling Craft apps automatically.\n\
+                         - Export / CLI: run `{id} --help` for full CLI subcommands."
+                    ),
+                );
+            }
             "docs" => self.help.open(Dialog::Docs),
             "licenses" => self.help.open(Dialog::Licenses),
             "about" => self.help.open(Dialog::About),

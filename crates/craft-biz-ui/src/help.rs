@@ -85,6 +85,11 @@ impl HelpState {
         self.open = Some(d);
         self.filter.clear();
     }
+    pub fn open_doc(&mut self, title: String, body: String) {
+        self.doc = Some((title, Ok(body)));
+        self.open = Some(Dialog::Docs);
+        self.filter.clear();
+    }
     pub fn is_open(&self) -> bool {
         self.open.is_some()
     }
@@ -209,7 +214,7 @@ fn shortcuts_ui(ui: &mut Ui, st: &mut HelpState, rows: &[ShortcutRow], de: bool)
 }
 
 fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
-    if docs.is_empty() {
+    if docs.is_empty() && st.doc.is_none() {
         ui.label(if de {
             "Diese App nennt keine Dokumente."
         } else {
