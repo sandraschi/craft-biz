@@ -19,6 +19,8 @@ pub struct Spec<'a> {
     pub docs: &'a [Doc],
     pub dark: bool,
     pub zoom: f32,
+    /// German page and menu copy. English when false.
+    pub lang_de: bool,
     /// Extra File items, above Quit.
     pub file: Vec<Item>,
     /// Extra View items, above zoom.
@@ -33,6 +35,7 @@ pub struct Change {
     pub action: Option<String>,
     pub dark: Option<bool>,
     pub zoom: Option<f32>,
+    pub lang_de: Option<bool>,
 }
 
 #[derive(Default)]
@@ -86,10 +89,13 @@ impl Bar {
             &info(spec),
             &shortcut_rows(&menus),
             spec.docs,
-            false,
+            spec.lang_de,
             dark,
             zoom,
         );
+        if let Some(en) = prefs.lang_en {
+            change.lang_de = Some(!en);
+        }
         if let Some(d) = prefs.dark {
             change.dark = Some(d);
             theme::apply(&ctx, d);
@@ -135,6 +141,8 @@ impl Bar {
             }
             "shell.theme_dark" => change.dark = Some(true),
             "shell.theme_light" => change.dark = Some(false),
+            "shell.lang_de" => change.lang_de = Some(true),
+            "shell.lang_en" => change.lang_de = Some(false),
             other => change.action = Some(other.to_string()),
         }
     }
@@ -201,50 +209,61 @@ fn it_pick(it: &Item) -> Option<Picked> {
 
 /// The bar a window would draw for this spec.
 pub fn menus(spec: &Spec<'_>) -> Vec<Menu> {
+    let de = spec.lang_de;
+    let t = |a: &str, b: &str| if de { a.to_string() } else { b.to_string() };
     let cmd = Modifiers::COMMAND;
     let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
-    let no_canvas = "This window has no canvas.";
-    let no_stack = "This window has no undo stack.";
-    let text_field = "The focused text field handles this.";
+    let no_canvas = t(
+        "Dieses Fenster hat keine Zeichenfläche.",
+        "This window has no canvas.",
+    );
+    let no_stack = t(
+        "Dieses Fenster hat keinen Undo-Stapel.",
+        "This window has no undo stack.",
+    );
+    let text_field = t(
+        "Das fokussierte Textfeld übernimmt das.",
+        "The focused text field handles this.",
+    );
 
     let mut file = spec.file.clone();
     if !file.is_empty() {
         file.push(Item::sep());
     }
     file.push(
-        Item::action("Quit", "shell.quit")
+        Item::action(t("Beenden", "Quit"), "shell.quit")
             .key(cmd, Key::Q)
             .key_text("Ctrl+Q"),
     );
 
     let edit = vec![
-        Item::action("Undo", "shell.none")
+        Item::action(t("Rückgängig", "Undo"), "shell.none")
             .enabled(false)
-            .hint(no_stack)
+            .hint(no_stack.clone())
             .key_text("Ctrl+Z"),
-        Item::action("Redo", "shell.none")
+        Item::action(t("Wiederholen", "Redo"), "shell.none")
             .enabled(false)
             .hint(no_stack)
             .key_text("Ctrl+Y"),
         Item::sep(),
-        Item::action("Cut", "shell.none")
+        Item::action(t("Ausschneiden", "Cut"), "shell.none")
             .enabled(false)
-            .hint(text_field)
+            .hint(text_field.clone())
             .key_text("Ctrl+X"),
-        Item::action("Copy", "shell.none")
+        Item::action(t("Kopieren", "Copy"), "shell.none")
             .enabled(false)
-            .hint(text_field)
+            .hint(text_field.clone())
             .key_text("Ctrl+C"),
-        Item::action("Paste", "shell.none")
+        Item::action(t("Einfügen", "Paste"), "shell.none")
             .enabled(false)
-            .hint(text_field)
+            .hint(text_field.clone())
             .key_text("Ctrl+V"),
-        Item::action("Select All", "shell.none")
+        Item::action(t("Alles auswählen", "Select All"), "shell.none")
             .enabled(false)
             .hint(text_field)
             .key_text("Ctrl+A"),
         Item::sep(),
-        Item::action("Preferences...", "shell.prefs")
+        Item::action(t("Einstellungen...", "Preferences..."), "shell.prefs")
             .key(cmd, Key::Comma)
             .key_text("Ctrl+,"),
     ];
@@ -254,57 +273,76 @@ pub fn menus(spec: &Spec<'_>) -> Vec<Menu> {
         view.push(Item::sep());
     }
     view.extend([
-        Item::action("Zoom In", "shell.zoom_in").key_text("Ctrl+="),
-        Item::action("Zoom Out", "shell.zoom_out").key_text("Ctrl+-"),
-        Item::action("Fit to Window", "shell.none")
+        Item::action(t("Vergrößern", "Zoom In"), "shell.zoom_in").key_text("Ctrl+="),
+        Item::action(t("Verkleinern", "Zoom Out"), "shell.zoom_out").key_text("Ctrl+-"),
+        Item::action(t("An Fenster anpassen", "Fit to Window"), "shell.none")
             .enabled(false)
-            .hint(no_canvas)
+            .hint(no_canvas.clone())
             .key_text("Ctrl+0"),
-        Item::action("Reset Zoom (100%)", "shell.zoom_reset").key_text("Ctrl+1"),
+        Item::action(t("Zoom 100%", "Reset Zoom (100%)"), "shell.zoom_reset").key_text("Ctrl+1"),
         Item::sep(),
-        Item::action("Toggle Grid", "shell.none")
+        Item::action(t("Raster", "Toggle Grid"), "shell.none")
             .enabled(false)
-            .hint(no_canvas),
-        Item::action("Toggle Guides", "shell.none")
+            .hint(no_canvas.clone()),
+        Item::action(t("Hilfslinien", "Toggle Guides"), "shell.none")
             .enabled(false)
-            .hint(no_canvas),
-        Item::action("Onion Skinning", "shell.none")
+            .hint(no_canvas.clone()),
+        Item::action(t("Zwiebelschicht", "Onion Skinning"), "shell.none")
             .enabled(false)
             .hint(no_canvas),
         Item::sep(),
         Item::sub(
-            "Interface Theme",
+            t("Farbschema", "Interface Theme"),
             vec![
-                Item::action("Dark", "shell.theme_dark").checked(spec.dark),
-                Item::action("Light", "shell.theme_light").checked(!spec.dark),
+                Item::action(t("Dunkel", "Dark"), "shell.theme_dark").checked(spec.dark),
+                Item::action(t("Hell", "Light"), "shell.theme_light").checked(!spec.dark),
+            ],
+        ),
+        Item::sub(
+            t("Sprache", "Language"),
+            vec![
+                Item::action("Deutsch", "shell.lang_de").checked(de),
+                Item::action("English", "shell.lang_en").checked(!de),
             ],
         ),
     ]);
 
-    let window = vec![Item::action("Reset Panel Layout", "shell.none")
+    let window = vec![Item::action(t("Layout zurücksetzen", "Reset Panel Layout"), "shell.none")
         .enabled(false)
-        .hint("This window does not dock panels.")];
+        .hint(t(
+            "Dieses Fenster dockt keine Paneele an.",
+            "This window does not dock panels.",
+        ))];
 
     let help = vec![
-        Item::action("Command Palette...", "shell.palette")
+        Item::action(t("Befehlspalette...", "Command Palette..."), "shell.palette")
             .key(cmd_shift, Key::P)
             .key_text("Ctrl+Shift+P"),
-        Item::action("Keyboard Shortcuts...", "shell.shortcuts")
+        Item::action(t("Tastenkürzel...", "Keyboard Shortcuts..."), "shell.shortcuts")
             .key(cmd, Key::Slash)
             .key_text("Ctrl+/"),
-        Item::action("Project Files & Docs...", "shell.docs"),
-        Item::action("Licenses & Notices...", "shell.licenses"),
-        Item::action(format!("About {}", spec.name), "shell.about"),
+        Item::action(
+            t("Projektdateien und Doku...", "Project Files & Docs..."),
+            "shell.docs",
+        ),
+        Item::action(
+            t("Lizenzen und Hinweise...", "Licenses & Notices..."),
+            "shell.licenses",
+        ),
+        Item::action(
+            format!("{} {}", t("Über", "About"), spec.name),
+            "shell.about",
+        ),
     ];
 
     let mut out = vec![
-        Menu::new("File", file),
-        Menu::new("Edit", edit),
-        Menu::new("View", view),
+        Menu::new(t("Datei", "File"), file),
+        Menu::new(t("Bearbeiten", "Edit"), edit),
+        Menu::new(t("Ansicht", "View"), view),
     ];
     out.extend(spec.middle.clone());
-    out.push(Menu::new("Window", window));
-    out.push(Menu::new("Help", help));
+    out.push(Menu::new(t("Fenster", "Window"), window));
+    out.push(Menu::new(t("Hilfe", "Help"), help));
     out
 }
 
@@ -353,6 +391,15 @@ pub fn repo_docs(manifest_dir: &str) -> Vec<Doc> {
     ]
 }
 
+/// German when `de` is set, otherwise English.
+pub fn t<'a>(de: bool, german: &'a str, english: &'a str) -> &'a str {
+    if de {
+        german
+    } else {
+        english
+    }
+}
+
 /// `--smoke` check for the bookend with no app-specific items.
 pub fn smoke(name: &str, version: &str, description: &str) -> Result<(), String> {
     let spec = Spec {
@@ -363,6 +410,7 @@ pub fn smoke(name: &str, version: &str, description: &str) -> Result<(), String>
         docs: &[],
         dark: true,
         zoom: 1.0,
+        lang_de: false,
         file: Vec::new(),
         view: Vec::new(),
         middle: Vec::new(),
@@ -425,6 +473,7 @@ mod tests {
             docs: &docs,
             dark: true,
             zoom: 1.0,
+            lang_de: false,
             file: vec![Item::action("Refresh", "app.refresh")],
             view: vec![Item::action("Invoices", "view.invoices").checked(true)],
             middle: vec![Menu::new(
