@@ -74,6 +74,7 @@ pub struct Frame {
     calls: Vec<Call>,
     forms: Vec<(String, Vec<(String, String)>)>,
     goto: Option<usize>,
+    open_help: Option<HelpTab>,
     toast: Vec<(String, Tone)>,
     pub search: String,
 }
@@ -87,6 +88,7 @@ impl Frame {
             calls: Vec::new(),
             forms: Vec::new(),
             goto: None,
+            open_help: None,
             toast: Vec::new(),
             search: String::new(),
         }
@@ -150,6 +152,10 @@ impl Frame {
     pub fn goto(&mut self, view: usize) {
         self.goto = Some(view);
     }
+    /// Open the Help Center at `tab`.
+    pub fn open_help(&mut self, tab: HelpTab) {
+        self.open_help = Some(tab);
+    }
     pub fn toast(&mut self, text: impl Into<String>, tone: Tone) {
         self.toast.push((text.into(), tone));
     }
@@ -170,6 +176,8 @@ pub struct AppMenus {
     pub middle: Vec<Menu>,
     /// Extra items at the end of Window.
     pub window: Vec<Item>,
+    /// Extra items in Help (before Licenses & About).
+    pub help: Vec<Item>,
 }
 
 /// Event kinds with a short description: (consumed, emitted).
@@ -529,6 +537,7 @@ impl<A: SuiteApp> Shell<A> {
             calls: Vec::new(),
             forms: Vec::new(),
             goto: None,
+            open_help: None,
             toast: Vec::new(),
             search: self.search.clone(),
         }
@@ -718,11 +727,15 @@ impl<A: SuiteApp> Shell<A> {
                 "shell.skills",
             ));
         }
+        help.extend([Item::action(
+            t("Projektdateien und Doku...", "Project Files & Docs..."),
+            "shell.docs",
+        )]);
+        if !am.help.is_empty() {
+            help.push(Item::sep());
+            help.extend(am.help);
+        }
         help.extend([
-            Item::action(
-                t("Projektdateien und Doku...", "Project Files & Docs..."),
-                "shell.docs",
-            ),
             Item::sep(),
             Item::action(
                 t("Lizenzen und Hinweise...", "Licenses & Notices..."),
@@ -1504,6 +1517,9 @@ impl<A: SuiteApp> Shell<A> {
 
         if let Some(v) = f.goto {
             self.view = v;
+        }
+        if let Some(tab) = f.open_help {
+            self.help.open_tab(tab);
         }
         for (m, tone) in std::mem::take(&mut f.toast) {
             self.toasts.push(m, tone);
