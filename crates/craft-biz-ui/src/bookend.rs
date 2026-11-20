@@ -307,20 +307,28 @@ pub fn menus(spec: &Spec<'_>) -> Vec<Menu> {
         ),
     ]);
 
-    let window = vec![Item::action(t("Layout zurücksetzen", "Reset Panel Layout"), "shell.none")
-        .enabled(false)
-        .hint(t(
-            "Dieses Fenster dockt keine Paneele an.",
-            "This window does not dock panels.",
-        ))];
+    let window = vec![
+        Item::action(t("Layout zurücksetzen", "Reset Panel Layout"), "shell.none")
+            .enabled(false)
+            .hint(t(
+                "Dieses Fenster dockt keine Paneele an.",
+                "This window does not dock panels.",
+            )),
+    ];
 
     let help = vec![
-        Item::action(t("Befehlspalette...", "Command Palette..."), "shell.palette")
-            .key(cmd_shift, Key::P)
-            .key_text("Ctrl+Shift+P"),
-        Item::action(t("Tastenkürzel...", "Keyboard Shortcuts..."), "shell.shortcuts")
-            .key(cmd, Key::Slash)
-            .key_text("Ctrl+/"),
+        Item::action(
+            t("Befehlspalette...", "Command Palette..."),
+            "shell.palette",
+        )
+        .key(cmd_shift, Key::P)
+        .key_text("Ctrl+Shift+P"),
+        Item::action(
+            t("Tastenkürzel...", "Keyboard Shortcuts..."),
+            "shell.shortcuts",
+        )
+        .key(cmd, Key::Slash)
+        .key_text("Ctrl+/"),
         Item::action(
             t("Projektdateien und Doku...", "Project Files & Docs..."),
             "shell.docs",

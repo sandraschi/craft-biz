@@ -14,7 +14,7 @@
 //! Commands go in the middle). Help holds the five dialogs: Command Palette,
 //! Keyboard Shortcuts, Project Files & Docs, Licenses & Notices, About.
 
-use crate::help::{self, AppInfo, Dialog, Doc, HelpState, ShortcutRow};
+use crate::help::{self, AppInfo, Dialog, Doc, HelpState, HelpTab, ShortcutRow};
 use crate::menu::{self, Item, Menu, Picked};
 use crate::palette::{self, Palette};
 use crate::shell::{self, Shot, Toasts, UiSettings};
@@ -275,6 +275,14 @@ pub trait SuiteApp {
     }
     /// Help > Project Files & Docs.
     fn docs(&self) -> Vec<Doc> {
+        Vec::new()
+    }
+    /// Embedded `HELP.md` for the tabbed Help Center.
+    fn help_md(&self) -> Option<&'static str> {
+        None
+    }
+    /// Bundled skills (`skills/*/SKILL.md`) for Help > Bundled Skills.
+    fn help_skills(&self) -> Vec<Doc> {
         Vec::new()
     }
     /// Keys handled inside views (board arrows...), for the shortcut sheet.
@@ -674,26 +682,48 @@ impl<A: SuiteApp> Shell<A> {
             window.extend(am.window);
         }
 
-        // Help: the seven-item suite.
-        let help = vec![
+        // Help: the 10-item Craft Menu Bar Standard.
+        let mut help = vec![
             Item::action(t("Befehle...", "Command Palette..."), "shell.palette").key(cmd, Key::K),
             Item::action(
                 t("Tastenkürzel...", "Keyboard Shortcuts..."),
                 "shell.shortcuts",
             )
             .key(Modifiers::NONE, Key::F1),
+            Item::sep(),
             Item::action(
                 t("Erste Schritte...", "Getting Started..."),
                 "shell.getting_started",
             ),
+            Item::action(t("Bedienung & Workflows...", "Usage..."), "shell.usage"),
             Item::action(
-                t("Bedienung & Workflows...", "Usage & Workflows..."),
-                "shell.usage",
+                t("Tipps & Tricks...", "Tips & Tricks..."),
+                "shell.tips_tricks",
             ),
+            Item::action(
+                t(
+                    "Stolperfallen & Sicherheit...",
+                    "Common Pitfalls & Safety...",
+                ),
+                "shell.pitfalls_safety",
+            ),
+            Item::action(
+                t("Geplante Erweiterungen...", "Planned Extensions..."),
+                "shell.planned_extensions",
+            ),
+        ];
+        if !self.app.help_skills().is_empty() {
+            help.push(Item::action(
+                t("Mitgelieferte Skills...", "Bundled Skills..."),
+                "shell.skills",
+            ));
+        }
+        help.extend([
             Item::action(
                 t("Projektdateien und Doku...", "Project Files & Docs..."),
                 "shell.docs",
             ),
+            Item::sep(),
             Item::action(
                 t("Lizenzen und Hinweise...", "Licenses & Notices..."),
                 "shell.licenses",
@@ -702,7 +732,7 @@ impl<A: SuiteApp> Shell<A> {
                 format!("{} {}", t("Über", "About"), self.app.name()),
                 "shell.about",
             ),
-        ];
+        ]);
 
         let mut menus = vec![
             Menu::new(t("Datei", "File"), file),
@@ -960,36 +990,13 @@ impl<A: SuiteApp> Shell<A> {
             }
             "palette" => self.palette.open_list(),
             "shortcuts" => self.help.open(Dialog::Shortcuts),
-            "getting_started" => {
-                let name = self.app.name();
-                let id = self.app.id();
-                self.help.open_doc(
-                    "Getting Started".into(),
-                    format!(
-                        "# Getting Started - {name}\n\n\
-                         1. Seed demo data from the toolbar or CLI (`{id} seed`).\n\
-                         2. Use the left navigation rail to switch between workspace views.\n\
-                         3. Press Ctrl+K for the Command Palette or F1 for Keyboard Shortcuts.\n\
-                         4. Open Help -> Project Files & Docs... to read embedded README & AGENTS docs."
-                    ),
-                );
-            }
-            "usage" => {
-                let name = self.app.name();
-                let id = self.app.id();
-                let tools = self.app.tools().len();
-                self.help.open_doc(
-                    "Usage & Workflows".into(),
-                    format!(
-                        "# Usage & Workflows - {name}\n\n\
-                         - Local SQLite WAL database: all changes persist immediately.\n\
-                         - MCP Server: run `{id} mcp` for stdio JSON-RPC ({tools} tools).\n\
-                         - Domino Bus: actions emit events to sibling Craft apps automatically.\n\
-                         - Export / CLI: run `{id} --help` for full CLI subcommands."
-                    ),
-                );
-            }
-            "docs" => self.help.open(Dialog::Docs),
+            "getting_started" => self.help.open_tab(HelpTab::GetStarted),
+            "usage" => self.help.open_tab(HelpTab::Usage),
+            "tips_tricks" => self.help.open_tab(HelpTab::TipsTricks),
+            "pitfalls_safety" => self.help.open_tab(HelpTab::PitfallsSafety),
+            "planned_extensions" => self.help.open_tab(HelpTab::PlannedExtensions),
+            "skills" => self.help.open_tab(HelpTab::Skills),
+            "docs" => self.help.open_tab(HelpTab::Docs),
             "licenses" => self.help.open(Dialog::Licenses),
             "about" => self.help.open(Dialog::About),
             "none" => {}
@@ -1420,12 +1427,16 @@ impl<A: SuiteApp> Shell<A> {
             let info = self.app.info();
             let rows = self.shortcut_rows();
             let docs = self.app.docs();
-            let ch = help::show(
+            let skills = self.app.help_skills();
+            let help_md = self.app.help_md();
+            let ch = help::show_center(
                 &ctx,
                 &mut self.help,
                 &info,
                 &rows,
                 &docs,
+                &skills,
+                help_md,
                 f.lang_de,
                 self.settings.dark,
                 ctx.zoom_factor(),

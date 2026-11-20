@@ -73,20 +73,112 @@ impl Doc {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HelpTab {
+    GetStarted,
+    Functions,
+    Usage,
+    TipsTricks,
+    PitfallsSafety,
+    PlannedExtensions,
+    Skills,
+    OtherCrafts,
+    #[default]
+    Docs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HelpSections {
+    pub get_started: String,
+    pub functions: String,
+    pub usage: String,
+    pub tips_tricks: String,
+    pub pitfalls_safety: String,
+    pub planned_extensions: String,
+    pub other_crafts: String,
+}
+
+/// Split a `HELP.md` document by `## ` headings into the standard Help Center tabs.
+pub fn parse_help_md(md: &str) -> HelpSections {
+    let mut out = HelpSections::default();
+    let mut current: Option<&'static str> = None;
+    let mut buf = String::new();
+
+    let flush = |sec: Option<&'static str>, text: &str, out: &mut HelpSections| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        match sec {
+            Some("get_started") => out.get_started = trimmed.to_string(),
+            Some("functions") => out.functions = trimmed.to_string(),
+            Some("usage") => out.usage = trimmed.to_string(),
+            Some("tips") => out.tips_tricks = trimmed.to_string(),
+            Some("pitfalls") => out.pitfalls_safety = trimmed.to_string(),
+            Some("planned") => out.planned_extensions = trimmed.to_string(),
+            Some("other") => out.other_crafts = trimmed.to_string(),
+            _ => {}
+        }
+    };
+
+    for line in md.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            flush(current, &buf, &mut out);
+            buf.clear();
+            let h = heading.to_lowercase();
+            current = if h.contains("get started") || h.contains("what ") {
+                Some("get_started")
+            } else if h.contains("function") {
+                Some("functions")
+            } else if h.contains("usage") {
+                Some("usage")
+            } else if h.contains("tip") {
+                Some("tips")
+            } else if h.contains("pitfall") || h.contains("safety") {
+                Some("pitfalls")
+            } else if h.contains("planned") {
+                Some("planned")
+            } else if h.contains("other craft") {
+                Some("other")
+            } else {
+                None
+            };
+            buf.push_str(line);
+            buf.push('\n');
+        } else if current.is_some() {
+            buf.push_str(line);
+            buf.push('\n');
+        }
+    }
+    flush(current, &buf, &mut out);
+    out
+}
+
 #[derive(Default)]
 pub struct HelpState {
     pub open: Option<Dialog>,
+    pub tab: HelpTab,
     filter: String,
     doc: Option<(String, Result<String, String>)>,
+    skill: Option<(String, Result<String, String>)>,
 }
 
 impl HelpState {
     pub fn open(&mut self, d: Dialog) {
         self.open = Some(d);
+        if d == Dialog::Docs {
+            self.tab = HelpTab::Docs;
+        }
+        self.filter.clear();
+    }
+    pub fn open_tab(&mut self, tab: HelpTab) {
+        self.tab = tab;
+        self.open = Some(Dialog::Docs);
         self.filter.clear();
     }
     pub fn open_doc(&mut self, title: String, body: String) {
         self.doc = Some((title, Ok(body)));
+        self.tab = HelpTab::Docs;
         self.open = Some(Dialog::Docs);
         self.filter.clear();
     }
@@ -129,6 +221,34 @@ pub fn show(
     dark: bool,
     zoom: f32,
 ) -> PrefsChange {
+    show_center(
+        ctx,
+        st,
+        info,
+        shortcuts,
+        docs,
+        &[],
+        None,
+        lang_de,
+        dark,
+        zoom,
+    )
+}
+
+/// Draw the open dialog with optional `HELP.md` sections and bundled skills. Esc closes it.
+#[allow(clippy::too_many_arguments)]
+pub fn show_center(
+    ctx: &Context,
+    st: &mut HelpState,
+    info: &AppInfo,
+    shortcuts: &[ShortcutRow],
+    docs: &[Doc],
+    skills: &[Doc],
+    help_md: Option<&str>,
+    lang_de: bool,
+    dark: bool,
+    zoom: f32,
+) -> PrefsChange {
     let mut change = PrefsChange::default();
     let Some(d) = st.open else { return change };
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -144,11 +264,17 @@ pub fn show(
                 .show(ctx, |ui| shortcuts_ui(ui, st, shortcuts, lang_de));
         }
         Dialog::Docs => {
-            window(t("Projektdateien und Doku", "Project Files & Docs"))
-                .open(&mut open)
-                .default_width(820.0)
-                .default_height(600.0)
-                .show(ctx, |ui| docs_ui(ui, st, docs, lang_de));
+            window(&format!(
+                "{} — {}",
+                info.name,
+                t("Hilfecenter", "Help Center")
+            ))
+            .open(&mut open)
+            .default_width(880.0)
+            .default_height(640.0)
+            .show(ctx, |ui| {
+                help_center_ui(ui, st, info, docs, skills, help_md, lang_de)
+            });
         }
         Dialog::Licenses => {
             window(t("Lizenzen und Hinweise", "Licenses & Notices"))
@@ -213,21 +339,198 @@ fn shortcuts_ui(ui: &mut Ui, st: &mut HelpState, rows: &[ShortcutRow], de: bool)
     });
 }
 
-fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
-    if docs.is_empty() && st.doc.is_none() {
+fn help_center_ui(
+    ui: &mut Ui,
+    st: &mut HelpState,
+    info: &AppInfo,
+    docs: &[Doc],
+    skills: &[Doc],
+    help_md: Option<&str>,
+    de: bool,
+) {
+    let mut tabs = vec![
+        (
+            HelpTab::GetStarted,
+            if de { "Erste Schritte" } else { "Get Started" },
+        ),
+        (
+            HelpTab::Functions,
+            if de { "Funktionen" } else { "Functions" },
+        ),
+        (HelpTab::Usage, if de { "Bedienung" } else { "Usage" }),
+        (
+            HelpTab::TipsTricks,
+            if de {
+                "Tipps & Tricks"
+            } else {
+                "Tips & Tricks"
+            },
+        ),
+        (
+            HelpTab::PitfallsSafety,
+            if de {
+                "Sicherheit"
+            } else {
+                "Pitfalls & Safety"
+            },
+        ),
+        (
+            HelpTab::PlannedExtensions,
+            if de { "Planung" } else { "Planned Extensions" },
+        ),
+    ];
+    if !skills.is_empty() {
+        tabs.push((
+            HelpTab::Skills,
+            if de { "Skills" } else { "Bundled Skills" },
+        ));
+    }
+    tabs.push((
+        HelpTab::OtherCrafts,
+        if de { "Weitere Crafts" } else { "Other Crafts" },
+    ));
+    tabs.push((
+        HelpTab::Docs,
+        if de {
+            "Projektdateien"
+        } else {
+            "Project Files & Docs"
+        },
+    ));
+
+    ui.horizontal_wrapped(|ui| {
+        for (tab, label) in tabs {
+            if ui.selectable_label(st.tab == tab, label).clicked() {
+                st.tab = tab;
+            }
+        }
+    });
+    ui.separator();
+
+    let sections = help_md.map(parse_help_md).unwrap_or_default();
+    match st.tab {
+        HelpTab::GetStarted => {
+            let fallback = format!(
+                "# Getting Started - {}\n\n\
+                 1. Use the left navigation rail to switch between workspace views.\n\
+                 2. Press Ctrl+K for the Command Palette or F1 for Keyboard Shortcuts.\n\
+                 3. Open Project Files & Docs to read embedded documentation.",
+                info.name
+            );
+            let body = if sections.get_started.is_empty() {
+                fallback
+            } else {
+                sections.get_started
+            };
+            section_text_ui(ui, "Get Started", &body, de);
+        }
+        HelpTab::Functions => {
+            let body = if sections.functions.is_empty() {
+                format!("No dedicated Functions section in {} HELP.md.", info.name)
+            } else {
+                sections.functions
+            };
+            section_text_ui(ui, "Functions", &body, de);
+        }
+        HelpTab::Usage => {
+            let body = if sections.usage.is_empty() {
+                format!(
+                    "# Usage - {}\n\n- Press Ctrl+K for the Command Palette.\n- Run with `--help` for CLI options.",
+                    info.name
+                )
+            } else {
+                sections.usage
+            };
+            section_text_ui(ui, "Usage (GUI, CLI & MCP)", &body, de);
+        }
+        HelpTab::TipsTricks => {
+            let body = if sections.tips_tricks.is_empty() {
+                "No Tips & Tricks section recorded yet.".to_string()
+            } else {
+                sections.tips_tricks
+            };
+            section_text_ui(ui, "Tips & Tricks", &body, de);
+        }
+        HelpTab::PitfallsSafety => {
+            let body = if sections.pitfalls_safety.is_empty() {
+                if info.safety.is_empty() {
+                    "No Common Pitfalls & Safety section recorded yet.".to_string()
+                } else {
+                    info.safety.clone()
+                }
+            } else {
+                sections.pitfalls_safety
+            };
+            section_text_ui(ui, "Common Pitfalls & Safety", &body, de);
+        }
+        HelpTab::PlannedExtensions => {
+            let body = if sections.planned_extensions.is_empty() {
+                "Nothing planned right now.".to_string()
+            } else {
+                sections.planned_extensions
+            };
+            section_text_ui(ui, "Planned Extensions", &body, de);
+        }
+        HelpTab::OtherCrafts => {
+            let body = if sections.other_crafts.is_empty() {
+                "See Project Files & Docs for ecosystem references.".to_string()
+            } else {
+                sections.other_crafts
+            };
+            section_text_ui(ui, "Other Crafts", &body, de);
+        }
+        HelpTab::Skills => doc_list_ui(ui, &mut st.skill, skills, "craft_skills_list", de),
+        HelpTab::Docs => doc_list_ui(ui, &mut st.doc, docs, "craft_docs_list", de),
+    }
+}
+
+fn section_text_ui(ui: &mut Ui, title: &str, text: &str, de: bool) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).family(semibold()));
+        if ui
+            .small_button(if de { "Kopieren" } else { "Copy" })
+            .clicked()
+        {
+            ui.ctx().copy_text(text.to_string());
+        }
+    });
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .id_salt(("craft_help_sec", title))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(text).monospace().size(13.0))
+                    .wrap_mode(egui::TextWrapMode::Wrap),
+            );
+        });
+}
+
+fn doc_list_ui(
+    ui: &mut Ui,
+    selected: &mut Option<(String, Result<String, String>)>,
+    docs: &[Doc],
+    salt: &str,
+    de: bool,
+) {
+    if selected.is_none() {
+        if let Some(first) = docs.iter().find(|d| d.available()) {
+            *selected = Some((first.title.clone(), first.load()));
+        }
+    }
+    if docs.is_empty() && selected.is_none() {
         ui.label(if de {
-            "Diese App nennt keine Dokumente."
+            "Keine Dokumente vorhanden."
         } else {
             "This app lists no documents."
         });
         return;
     }
-    egui::Panel::left("craft_docs_list")
+    egui::Panel::left(salt)
         .resizable(false)
         .exact_size(220.0)
         .show(ui, |ui| {
             for d in docs {
-                let sel = st.doc.as_ref().is_some_and(|(t, _)| *t == d.title);
+                let sel = selected.as_ref().is_some_and(|(t, _)| *t == d.title);
                 let ok = d.available();
                 let r = ui
                     .add_enabled(ok, egui::Button::selectable(sel, d.title.as_str()))
@@ -242,11 +545,11 @@ fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
                     ))
                 };
                 if r.clicked() {
-                    st.doc = Some((d.title.clone(), d.load()));
+                    *selected = Some((d.title.clone(), d.load()));
                 }
             }
         });
-    egui::CentralPanel::default().show(ui, |ui| match &st.doc {
+    egui::CentralPanel::default().show(ui, |ui| match selected {
         None => {
             ui.label(if de {
                 "Links ein Dokument wählen."
@@ -256,7 +559,7 @@ fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
         }
         Some((title, Ok(text))) => {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(title).family(semibold()));
+                ui.label(RichText::new(title.as_str()).family(semibold()));
                 if ui
                     .small_button(if de { "Kopieren" } else { "Copy" })
                     .clicked()
@@ -266,7 +569,7 @@ fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
             });
             ui.separator();
             egui::ScrollArea::both()
-                .id_salt("craft_doc_text")
+                .id_salt(("craft_doc_text", salt))
                 .show(ui, |ui| {
                     ui.add(
                         egui::Label::new(RichText::new(text.as_str()).monospace().size(13.0))
@@ -277,7 +580,7 @@ fn docs_ui(ui: &mut Ui, st: &mut HelpState, docs: &[Doc], de: bool) {
         Some((_, Err(e))) => {
             ui.colored_label(
                 theme::tone_colors(crate::Tone::Danger, ui.visuals().dark_mode).0,
-                e,
+                e.as_str(),
             );
         }
     });
